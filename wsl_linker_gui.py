@@ -321,7 +321,7 @@ class WSLLinkerApp(ctk.CTk):
             btn_term = ctk.CTkButton(btn_frame, text="💻 Open Terminal", width=120, height=34, fg_color="#22232e", hover_color="#2f3142", text_color=COLOR_TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda a=alias_name, d=distro, p=wsl_path: self.open_linux_bash(a, d, p))
             btn_term.pack(side=tk.LEFT, padx=4)
 
-            btn_del = ctk.CTkButton(btn_frame, text="🗑️ Safe Remove", width=115, height=34, fg_color="#2a1a1e", hover_color=COLOR_DANGER, text_color=COLOR_DANGER, hover_text_color=COLOR_TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda a=alias_name, w=win_path, d=distro, p=wsl_path: self.delete_link(a, w, d, p))
+            btn_del = ctk.CTkButton(btn_frame, text="🗑️ Safe Remove", width=115, height=34, fg_color="#2a1a1e", hover_color=COLOR_DANGER, text_color=COLOR_DANGER, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda a=alias_name, w=win_path, d=distro, p=wsl_path: self.delete_link(a, w, d, p))
             btn_del.pack(side=tk.LEFT, padx=4)
 
     def create_link(self):
