@@ -1,0 +1,77 @@
+#!/bin/bash
+# Bash Wrapper for wsl-linker inside WSL distro.
+# Reads the shared Windows host registry map to show mappings and execute tools.
+
+# Colors for terminal
+GREEN="\033[92m"
+YELLOW="\033[93m"
+RED="\033[91m"
+CYAN="\033[96m"
+RESET="\033[0m"
+BOLD="\033[1m"
+
+# Find Windows user home registry path via mount
+WINDOWS_USER=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r\n')
+REGISTRY_PATH="/mnt/c/Users/${WINDOWS_USER}/.wsl-linker/links.json"
+
+if [ ! -f "$REGISTRY_PATH" ]; then
+    # Fallback to local Linux home
+    REGISTRY_PATH="$HOME/.wsl-linker/links.json"
+fi
+
+list_mappings() {
+    if [ ! -f "$REGISTRY_PATH" ]; then
+        echo -e "${YELLOW}No wsl-linker registry mappings found at ${REGISTRY_PATH}${RESET}"
+        return
+    fi
+
+    echo -e "\n${BOLD}${GREEN}WSL Linker Registry Mappings (Read from Host)${RESET}"
+    echo "=============================================================================================================="
+    printf "${BOLD}%-20s | %-40s | %-15s | %-25s${RESET}\n" "Name" "Windows Path" "Distro" "WSL Target Path"
+    echo "--------------------------------------------------------------------------------------------------------------"
+    
+    # Use python (pre-installed in Ubuntu) to parse the JSON cleanly without external jq dependency
+    python3 -c "
+import json
+with open('${REGISTRY_PATH}', 'r') as f:
+    data = json.load(f)
+for m in data.get('mappings', []):
+    print(f\"{m['name']:<20} | {m['windows_path']:<40} | {m['wsl_distro']:<15} | {m['wsl_path']:<25}\")
+" 2>/dev/null
+
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error: Failed to parse link registry JSON file.${RESET}"
+    fi
+    echo "=============================================================================================================="
+    echo -e "Config path: ${REGISTRY_PATH}\n"
+}
+
+show_help() {
+    echo -e "${BOLD}WSL Linker CLI (Guest Bridge Mode)${RESET}"
+    echo "Usage: wsl-linker <command>"
+    echo ""
+    echo "Commands:"
+    echo "  list     List all active folder mappings on the host registry"
+    echo "  help     Show this help documentation"
+    echo ""
+    echo -e "${YELLOW}Note: Adding or removing symbolic links must be run from the Windows Host shell (Admin/Developer Mode).${RESET}"
+}
+
+# Dispatcher
+case "$1" in
+    list)
+        list_mappings
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        if [ -z "$1" ]; then
+            show_help
+        else
+            echo -e "${RED}Unknown command: $1${RESET}"
+            show_help
+            exit 1
+        fi
+        ;;
+esac
