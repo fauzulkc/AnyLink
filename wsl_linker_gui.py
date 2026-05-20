@@ -142,16 +142,21 @@ class WSLLinkerApp(ctk.CTk):
         ctk.CTkLabel(right_frame, text="ALIAS NAME", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
         self.entry_name = ctk.CTkEntry(right_frame, placeholder_text="e.g. my-project", fg_color=COLOR_BG_INPUT, border_color=COLOR_BORDER, height=40, font=("Segoe UI", 11))
         self.entry_name.pack(fill=tk.X, padx=25, pady=(0, 15))
+        self.entry_name.bind("<KeyRelease>", self.update_path_preview)
 
-        ctk.CTkLabel(right_frame, text="LOCAL WINDOWS PATH", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
+        ctk.CTkLabel(right_frame, text="LOCAL PARENT WINDOWS DIRECTORY", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
         path_row = ctk.CTkFrame(right_frame, fg_color="transparent")
-        path_row.pack(fill=tk.X, padx=25, pady=(0, 15))
+        path_row.pack(fill=tk.X, padx=25, pady=(0, 4))
         
-        self.entry_win_path = ctk.CTkEntry(path_row, placeholder_text="Select destination...", fg_color=COLOR_BG_INPUT, border_color=COLOR_BORDER, height=40, font=("Segoe UI", 11))
+        self.entry_win_path = ctk.CTkEntry(path_row, placeholder_text="Select parent folder (e.g. D:\\Projects)...", fg_color=COLOR_BG_INPUT, border_color=COLOR_BORDER, height=40, font=("Segoe UI", 11))
         self.entry_win_path.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=(0, 8))
+        self.entry_win_path.bind("<KeyRelease>", self.update_path_preview)
         
         btn_browse = ctk.CTkButton(path_row, text="Browse", width=75, height=40, fg_color="#2b2d3a", hover_color="#3e4052", text_color=COLOR_TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), command=self.browse_windows_folder)
         btn_browse.pack(side=tk.RIGHT)
+
+        path_desc = ctk.CTkLabel(right_frame, text="Your virtual symlink folder (named after the Alias) will be created inside this folder automatically.", font=("Segoe UI", 9), text_color=COLOR_TEXT_MUTED, justify=tk.LEFT, wraplength=310)
+        path_desc.pack(anchor=tk.W, padx=25, pady=(0, 15))
 
         ctk.CTkLabel(right_frame, text="WSL TARGET DIRECTORY PATH", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
         self.entry_wsl_path = ctk.CTkEntry(right_frame, placeholder_text="e.g. /home/user/code/my-project", fg_color=COLOR_BG_INPUT, border_color=COLOR_BORDER, height=40, font=("Segoe UI", 11))
@@ -159,7 +164,11 @@ class WSLLinkerApp(ctk.CTk):
 
         ctk.CTkLabel(right_frame, text="TARGET WSL DISTRIBUTION", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
         self.combo_distro = ctk.CTkOptionMenu(right_frame, values=self.distros, fg_color=COLOR_BG_INPUT, button_color="#2b2d3a", button_hover_color="#3e4052", height=40, font=("Segoe UI", 11))
-        self.combo_distro.pack(fill=tk.X, padx=25, pady=(0, 25))
+        self.combo_distro.pack(fill=tk.X, padx=25, pady=(0, 20))
+
+        # Path Preview Section
+        self.lbl_preview = ctk.CTkLabel(right_frame, text="Preview: (Enter Alias and Parent Path)", font=("Segoe UI", 10, "italic"), text_color=COLOR_TEXT_MUTED, justify=tk.LEFT, wraplength=310)
+        self.lbl_preview.pack(anchor=tk.W, padx=25, pady=(0, 20))
 
         # Submit Action
         self.btn_add = ctk.CTkButton(right_frame, text="Create Direct Link 🔗", fg_color=COLOR_ACCENT, hover_color=COLOR_ACCENT_HOVER, height=45, font=("Segoe UI", 12, "bold"), command=self.create_link)
@@ -217,13 +226,29 @@ class WSLLinkerApp(ctk.CTk):
 
     def browse_windows_folder(self):
         """Browse native folders and automatically generate aliases."""
-        folder = filedialog.askdirectory(title="Select Local Windows Workspace Folder")
+        folder = filedialog.askdirectory(title="Select Local Parent Windows Directory")
         if folder:
             self.entry_win_path.delete(0, tk.END)
             self.entry_win_path.insert(0, os.path.abspath(folder))
-            basename = os.path.basename(folder)
-            if basename and not self.entry_name.get():
-                self.entry_name.insert(0, basename)
+            self.update_path_preview()
+
+    def update_path_preview(self, event=None):
+        """Dynamically compute and display the target Windows path in real-time."""
+        name = self.entry_name.get().strip()
+        win_parent = self.entry_win_path.get().strip()
+        
+        if not name and not win_parent:
+            self.lbl_preview.configure(text="Preview: (Enter Alias and Parent Path)", text_color=COLOR_TEXT_MUTED)
+        elif not win_parent:
+            self.lbl_preview.configure(text=f"Preview: [Parent Folder]\\{name}", text_color=COLOR_ACCENT)
+        elif not name:
+            self.lbl_preview.configure(text=f"Preview: {win_parent}\\[Alias Name]", text_color=COLOR_ACCENT)
+        else:
+            try:
+                full_path = os.path.join(win_parent, name)
+                self.lbl_preview.configure(text=f"Preview: {full_path}", text_color=COLOR_SUCCESS)
+            except Exception:
+                self.lbl_preview.configure(text="Preview: Invalid Path", text_color=COLOR_DANGER)
 
     def refresh_workspace_list(self):
         """Read links.json registry and render gorgeous workspace card widgets inside the frame."""
@@ -254,24 +279,38 @@ class WSLLinkerApp(ctk.CTk):
 
         # 3. Populate cards
         for mapping in mappings:
-            card = ctk.CTkFrame(self.cards_container, fg_color=COLOR_BG_CARD, corner_radius=10, border_width=1, border_color=COLOR_BORDER, height=90)
+            card = ctk.CTkFrame(self.cards_container, fg_color=COLOR_BG_CARD, corner_radius=10, border_width=1, border_color=COLOR_BORDER)
             card.pack(fill=tk.X, pady=6, padx=4)
-            card.pack_propagate(False)
 
-            # Left side content info
+            # Right side actions row (packed FIRST to protect from shrink squeezing)
+            btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+            btn_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 20), pady=12)
+
+            # Left side content info (packed SECOND to expand/shrink dynamically)
             info_frame = ctk.CTkFrame(card, fg_color="transparent")
-            info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=20, pady=12)
+            info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(20, 10), pady=12)
 
             name_lbl = ctk.CTkLabel(info_frame, text=mapping["name"], font=("Segoe UI", 14, "bold"), text_color=COLOR_TEXT_PRIMARY)
             name_lbl.pack(anchor=tk.W)
 
             path_mapping_str = f"{mapping['windows_path']}  ➔  [{mapping['wsl_distro']}] {mapping['wsl_path']}"
-            path_lbl = ctk.CTkLabel(info_frame, text=path_mapping_str, font=("Segoe UI", 10), text_color=COLOR_TEXT_MUTED)
-            path_lbl.pack(anchor=tk.W, pady=(2, 0))
+            path_lbl = ctk.CTkLabel(info_frame, text=path_mapping_str, font=("Segoe UI", 10), text_color=COLOR_TEXT_MUTED, justify=tk.LEFT)
+            path_lbl.pack(anchor=tk.W, pady=(2, 0), fill=tk.X, expand=True)
 
-            # Right side actions row
-            btn_frame = ctk.CTkFrame(card, fg_color="transparent")
-            btn_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=20, pady=12)
+            # Dynamic path wrapping configure handler on resize
+            def make_configure_handler(lbl, btns, c_widget):
+                def on_configure(event):
+                    if event.widget != c_widget:
+                        return
+                    btn_w = btns.winfo_reqwidth()
+                    available_w = event.width - btn_w - 70
+                    if available_w > 150:
+                        lbl.configure(wraplength=available_w)
+                    else:
+                        lbl.configure(wraplength=150)
+                return on_configure
+
+            card.bind("<Configure>", make_configure_handler(path_lbl, btn_frame, card))
 
             # Create references to pass variables properly inside loops
             alias_name = mapping["name"]
@@ -288,15 +327,20 @@ class WSLLinkerApp(ctk.CTk):
     def create_link(self):
         """Implements safe symlink creation on form submit."""
         name = self.entry_name.get().strip()
-        win_path = self.entry_win_path.get().strip()
+        win_parent = self.entry_win_path.get().strip()
         wsl_path = self.entry_wsl_path.get().strip().replace('\\', '/')
         distro = self.combo_distro.get()
 
-        if not name or not win_path or not wsl_path:
+        if not name or not win_parent or not wsl_path:
             messagebox.showwarning("Incomplete Fields", "Please complete all inputs before establishing a link.")
             return
 
-        win_path = os.path.abspath(win_path)
+        win_parent = os.path.abspath(win_parent)
+        if not os.path.isdir(win_parent):
+            messagebox.showerror("Invalid Parent Directory", f"The local parent directory '{win_parent}' does not exist.\n\nPlease select an existing folder first.")
+            return
+
+        win_path = os.path.join(win_parent, name)
         target_win_unc = f"\\\\wsl.localhost\\{distro}" + wsl_path.replace('/', '\\')
 
         # Check duplicate configurations
@@ -320,7 +364,7 @@ class WSLLinkerApp(ctk.CTk):
 
         # Verify host path is clean
         if os.path.exists(win_path):
-            messagebox.showerror("Folder Exists", f"The local Windows path '{win_path}' already exists as a physical directory.\n\nTo link it, the folder path must not already exist (the creator will generate it as a virtual link folder).")
+            messagebox.showerror("Folder Exists", f"The local Windows path '{win_path}' already exists as a physical directory.\n\nPlease choose a different Alias name or delete the existing directory first.")
             return
 
         # Attempt to create directory symbolic link
