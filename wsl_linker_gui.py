@@ -449,9 +449,10 @@ class WSLLinkerApp(ctk.CTk):
         """
         self.log(f"Spawning WSL terminal inside '{distro}' at '{wsl_path}'...")
 
-        # Strategy 1: Windows Terminal with correct WSL distro profile
-        # wt opens the distro by name, --cd sets the Linux start directory natively
-        wt_cmd = ["wt.exe", "-p", distro, "wsl.exe", "-d", distro, "--cd", wsl_path]
+        # Strategy 1: Windows Terminal with correct WSL distro profile and starting directory
+        # Convert the WSL Unix path to a Windows UNC path format so wt.exe can open it natively
+        wsl_unc_path = f"\\\\wsl.localhost\\{distro}" + wsl_path.replace('/', '\\')
+        wt_cmd = ["wt.exe", "-p", distro, "-d", wsl_unc_path]
 
         # Strategy 2: Fallback — direct wsl.exe in a new console window
         # "start" launches a detached window; wsl --cd lands directly in Linux directory
