@@ -439,17 +439,40 @@ class WSLLinkerApp(ctk.CTk):
         messagebox.showinfo("Removed", f"Workspace '{name}' has been safely unlinked!")
 
     def open_linux_bash(self, name, distro, wsl_path):
-        """Spawns a native interactive Bash session inside the designated WSL distro directory."""
-        self.log(f"Spawning interactive terminal inside WSL distro '{distro}' mapped at '{wsl_path}'...")
+        """Spawns a native WSL Linux shell directly in the correct distro and directory.
         
-        # Command to launch native Command Prompt running WSL Bash directly at the directory
-        cmd_string = f"start cmd.exe /k \"wsl -d {distro} -e bash -c \\\"cd '{wsl_path}' && bash\\\"\""
+        Launch priority:
+          1. Windows Terminal (wt.exe) with the matching WSL distro profile — opens
+             a proper tabbed terminal already logged into Linux.
+          2. Plain wsl.exe with --cd — falls back gracefully on older Windows builds
+             or systems without Windows Terminal installed.
+        """
+        self.log(f"Spawning WSL terminal inside '{distro}' at '{wsl_path}'...")
+
+        # Strategy 1: Windows Terminal with correct WSL distro profile
+        # wt opens the distro by name, --cd sets the Linux start directory natively
+        wt_cmd = ["wt.exe", "-p", distro, "wsl.exe", "-d", distro, "--cd", wsl_path]
+
+        # Strategy 2: Fallback — direct wsl.exe in a new console window
+        # "start" launches a detached window; wsl --cd lands directly in Linux directory
+        fallback_cmd = f'start wsl.exe -d {distro} --cd "{wsl_path}"'
+
         try:
-            subprocess.run(cmd_string, shell=True)
-            self.log(f"Interactive bash session spawned for workspace '{name}'.", is_success=True)
-        except Exception as e:
-            self.log(f"Failed to launch Bash terminal: {e}", is_error=True)
-            messagebox.showerror("Launch Error", f"Failed to launch terminal window:\n\n{e}")
+            # Check if Windows Terminal is available
+            wt_check = subprocess.run(["where", "wt.exe"], capture_output=True, text=True)
+            if wt_check.returncode == 0:
+                subprocess.Popen(wt_cmd)
+                self.log(f"Opened Windows Terminal → [{distro}] {wsl_path}", is_success=True)
+            else:
+                raise FileNotFoundError("wt.exe not found")
+        except Exception:
+            # Fallback to plain wsl.exe
+            try:
+                subprocess.run(fallback_cmd, shell=True)
+                self.log(f"Opened WSL terminal → [{distro}] {wsl_path}", is_success=True)
+            except Exception as e:
+                self.log(f"Failed to launch terminal: {e}", is_error=True)
+                messagebox.showerror("Launch Error", f"Failed to open a WSL terminal:\n\n{e}")
 
 if __name__ == "__main__":
     app = WSLLinkerApp()
