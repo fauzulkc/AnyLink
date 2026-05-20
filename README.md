@@ -79,3 +79,15 @@ We have introduced a dedicated developer **`Makefile`** in the repository root t
 
 *   **Enable Developer Mode**: Creating symbolic links in Windows normally requires administrator elevation. To run WSL Linker and create direct links instantly without administrator popups, enable **Developer Mode** in Windows (Settings > Update & Security > For Developers).
 *   **Safe Unlinking**: Deleting directory symbolic links manually inside older versions of Windows File Explorer can occasionally result in recursive deletions inside the target WSL folder. **Always use the "Safe Remove" button or CLI command**. Our unlinker safely runs `os.rmdir` on Windows which untethers the symlink junction itself, leaving your WSL files 100% safe and untouched.
+
+---
+
+## 📜 Open Source & Distribution
+
+`wsl-linker` is proud to be **100% open-source software**! 
+
+*   **Free to Replicate & Distribute**: You are completely free to clone this repository, modify the code, build your own versions, and distribute the standalone `WSL Linker.exe` executable anywhere.
+*   **Permissive Licensing**: The project is published under the highly permissive **MIT License**, permitting unrestricted commercial use, private modification, distribution, and sublicensing.
+
+Feel free to fork, customize the stylesheet, package it for your development team, or distribute it as an independent tool. Let's make cross-platform WSL development seamless and ultra-fast for everyone! 🚀
+

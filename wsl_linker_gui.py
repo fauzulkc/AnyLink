@@ -32,9 +32,29 @@ class WSLLinkerApp(ctk.CTk):
         
         # Window configuration
         self.title("WSL Linker - Workspace Manager")
-        self.geometry("1100x820")
+        
+        # Detect host screen resolution dynamically to decide the best default geometry
+        try:
+            screen_width = self.winfo_screenwidth()
+            screen_height = self.winfo_screenheight()
+            
+            # Select optimal height based on screen limits (virtual scaled coordinates)
+            if screen_height <= 800:
+                # HD screens (1366x768) or heavily-scaled laptop screens
+                default_width = 1100
+                default_height = 650
+            else:
+                # Full HD (1920x1080), QHD, or 4K screens
+                default_width = 1100
+                default_height = 800
+        except Exception:
+            # Safe default fallback
+            default_width = 1100
+            default_height = 680
+
+        self.geometry(f"{default_width}x{default_height}")
         self.configure(fg_color=COLOR_BG_MAIN)
-        self.minsize(700, 600)
+        self.minsize(700, 550)
 
         # Sidebar state management
         self.sidebar_visible = True
@@ -319,7 +339,7 @@ class WSLLinkerApp(ctk.CTk):
             btn_term = ctk.CTkButton(btn_frame, text="💻 Open Terminal", width=120, height=34, fg_color="#22232e", hover_color="#2f3142", text_color=COLOR_TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda a=alias_name, d=distro, p=wsl_path: self.open_linux_bash(a, d, p))
             btn_term.pack(side=tk.LEFT, padx=4)
 
-            btn_del = ctk.CTkButton(btn_frame, text="🗑️ Safe Remove", width=115, height=34, fg_color="#2a1a1e", hover_color=COLOR_DANGER, text_color=COLOR_DANGER, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda a=alias_name, w=win_path, d=distro, p=wsl_path: self.delete_link(a, w, d, p))
+            btn_del = ctk.CTkButton(btn_frame, text="🗑 Safe Remove", width=115, height=34, fg_color="#2a1a1e", hover_color="#441f26", text_color=COLOR_DANGER, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda a=alias_name, w=win_path, d=distro, p=wsl_path: self.delete_link(a, w, d, p))
             btn_del.pack(side=tk.LEFT, padx=4)
 
             # Pack containers by default in the wide layout so they are immediately visible
