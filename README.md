@@ -1,76 +1,81 @@
-# 🚀 WSL Linker (`wsl-linker`) - Desktop GUI Manager
+# 🚀 WSL Linker (`wsl-linker`) - Modern GUI Workspace Manager
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20WSL2-blue.svg)]()
 
-`wsl-linker` is a lightweight, open-source Windows desktop manager designed to connect your **Windows Host** workspace directories directly to your **WSL 2 Linux filesystem** via directory symbolic links.
+`wsl-linker` is an open-source, lightweight Windows desktop application and CLI manager designed to link your **Windows Host** workspace directories directly to your **WSL 2 Linux filesystem** using native Windows directory symbolic links.
 
-It provides a state-of-the-art **Fluent Dark Mode** UI, enabling developers and teams to configure direct-reference folders with zero duplication, compile code at native speeds, and drop straight into dynamic Linux shells inside their current workspaces.
-
----
-
-## 💡 Desktop GUI Highlights
-
-*   **⚡ Zero-Lag Filesystem Links**: Employs native Windows directory symbolic links to reference WSL folders directly. No file syncing, duplication, or CPU-hogging watchers.
-*   **📂 Native Folder Dialogs**: Click "Browse" to select Windows project directories via the operating system's native folder dialogs instead of copy-pasting paths.
-*   **🐋 Auto WSL Distro Discovery**: Automatically queries your active WSL distros (e.g. `Ubuntu-24.04`, `Debian`, etc.) on start and populates them into an easy dropdown list.
-*   **💻 Direct Bash Terminal Spawner**: Select a linked workspace in the table and click "Open Linux Bash Terminal" to instantly launch a terminal window already logged in and context-mapped to that WSL directory!
-*   **🛡️ Safely Remove Links**: Cleans up symbolic link folder junctions safely via native unlinking (`os.rmdir`), leaving actual repositories inside WSL completely untouched.
-*   **💾 Standalone Executable (`.exe`)**: Can be compiled into a single self-contained binary file containing the GUI libraries, allowing other developers to download and run it instantly with zero prerequisites.
+It provides a premium **Fluent Dark Mode** GUI, enabling developers to build, edit, and manage cross-platform projects with zero disk duplication, maximum execution speed, and absolute convenience.
 
 ---
 
-## 📦 How to Compile the Standalone `.exe`
+## 🌟 The Origin Story: The Antigravity IDE 2.0 Dilemma
 
-We support two ways to compile your standalone binary executable. Using the **Docker compilation** method is highly recommended as it keeps your host system completely clean.
+`wsl-linker` was born out of an urgent development need. 
 
-### Option A: Isolated Compile via Docker (Recommended)
-This uses a lightweight, pre-configured Wine/PyInstaller container to package your Windows executable, meaning you do not need Python or packaging libraries on your host system:
+When **Google's Antigravity IDE upgraded to 2.0**, the traditional Editor interface was completely restructured, resulting in the loss of the standard **WSL Remote Plugin** workflow. Developers who depended on the WSL Remote Plugin to bridge host-side editors to Linux containers were suddenly stranded, unable to easily access and edit files locked inside their WSL 2 filesystem.
 
-1. Ensure **Docker Desktop** is running.
-2. Double-click **`compile-docker.bat`** in your project folder.
-3. Once completed, your executable is ready at:
-   ```text
-   D:\AI Stuff\projects\fauzul\dist\WSL Linker.exe
-   ```
+We needed a solution immediately. We did not want to compromise by moving code out of the WSL filesystem back onto the slow Windows host, because cross-operating-system disk operations (accessing `/mnt/c/` from WSL) degrade Git, Docker, and npm performance by up to **10x**.
 
----
+**The Solution**: `wsl-linker` bridges the gap. By establishing a zero-latency, virtual Directory Symbolic Link on Windows pointing straight to WSL (`\\wsl.localhost\Ubuntu-24.04\home\user\project`), developers can:
+1. Keep their source files physically on the native Linux ext4 partition (maintaining 100% build performance).
+2. Open, search, and edit their files directly using native Windows host editors (VS Code, Sublime Text, PyCharm, Notepad++) on the host side.
+3. Drop instantly into WSL Linux terminals to run test suites or compile binaries.
 
-### Option B: Local Compile via Python
-If you already have Python installed on your host and prefer a local build:
-
-1. Double-click **`compile.bat`** in your project folder.
-2. The script will automatically install `pyinstaller` locally.
-3. It compiles the `wsl_linker_gui.py` application into a single, self-contained file.
-4. Once completed, your executable is ready at:
-   ```text
-   D:\AI Stuff\projects\fauzul\dist\WSL Linker.exe
-   ```
-
-You can now copy **`WSL Linker.exe`** to any Windows machine and run it with zero dependencies!
+This tool restored developer workflows instantly, turning a breaking IDE update into a highly optimized, lag-free development paradigm.
 
 ---
 
-## 📖 GUI Features Breakdown
+## 💡 Powerful Use Cases
 
-### 1. The Mapping Registry Table (The Map)
-The center grid acts as a real-time list of all active links mapped on your PC. Selecting any row unlocks quick action buttons.
+`wsl-linker` solves critical friction points for Windows and WSL developers:
 
-### 2. Create Direct Link (Form Inputs)
-*   **Alias Name**: Give your linked folder a simple shortname (e.g., `my-project`).
-*   **Windows Folder Path**: Click the `Browse` button and select an empty folder on Windows where the symlink will live.
-*   **WSL Target Path**: Supply the remote Linux path inside WSL (e.g. `/home/user/code/my-project`).
-*   **Target WSL Distribution**: Select your active distro from the dropdown.
+### 1. High-Performance Web Development (npm, Git, Docker)
+Running `npm install` or `git status` from a WSL environment on files stored in Windows (`/mnt/c/`) is notoriously slow due to operating system translation layers. By keeping your repositories entirely on the Linux filesystem and using `wsl-linker`, your builds run at **100% native Linux speed**, while you still edit them locally on Windows.
 
-### 3. Open Linux Bash Terminal
-Click this to spawn a new, native interactive Bash session logged inside WSL inside your context-mapped folder directory.
+### 2. Standalone Zero-Dependency GUI for Cross-Functional Teams
+Often, designers, QA engineers, or junior developers need to run or preview a project on their Windows machines without spending hours installing Python, PyInstaller, or configuring WSL path shares. The single-file compiled binary `WSL Linker.exe` gives them a simple, zero-setup dashboard to manage paths instantly.
 
-### 4. Activity Console Logs
-A scrolling console feed at the bottom of the window displays error outputs, success logs, permission issues, and OS system calls in real-time.
+### 3. Native Windows File Explorer Management
+Browse, preview, rename, drag-and-drop, and manage files physically located deep inside WSL directly from the native Windows File Explorer (`explorer.exe`) as if they were standard Windows folders.
+
+### 4. Direct Terminal Context-Dropping
+Spawn a terminal logged into any WSL 2 distribution inside your specific workspace context with a single click. No more opening a shell, typing `wsl`, and hunting down complex path directories.
+
+### 5. Seamless CLI Proxy Runner (`wsl-linker run`)
+If you are working inside your Windows shell (CMD or PowerShell) in the linked folder, you can run Linux commands on your project natively:
+```powershell
+# Instantly runs npm install inside the corresponding WSL Linux directory
+wsl-linker run npm install
+```
 
 ---
 
-## 🔒 Security & Safety Best Practices
+## 🖥️ Desktop GUI Highlights & Latest Upgrades
 
-*   **Developer Mode / Admin Elevation**: Creating directory symbolic links on Windows requires administrator privileges. Turn on **Developer Mode** inside Windows Settings (Update & Security > For Developers) to allow standard users to create symlinks without administrator prompts.
-*   **Safe Unlinking**: Always use the **Safely Remove Symlink** button or command to delete mappings. Manual folder deletion in older File Explorer versions can sometimes lead to recursive deletions inside WSL; our script isolates mapping deletions safely.
+The GUI features a state-of-the-art **Fluent Dark theme** styled with CustomTkinter, built with precision and responsiveness:
+
+*   **Sleek Parent Directory Onboarding**: The app no longer forces you to choose a path that *must not exist*. You simply browse and select your **Local Parent Windows Directory** (e.g. `D:\AI Stuff\projects\fauzul`). The application automatically appends your **Alias Name** and creates the virtual link folder inside it!
+*   **Live Path Preview Widget**: Watch your target path build in real-time as you type your Alias or select your parent folder. The preview shows in a clean, italicized typography and turns **emerald green** when all details are ready.
+*   **Auto-Wrapping Card Mappings**: Squeezing the window horizontally will never cut off or squish your action buttons. Mappings cards utilize a prioritized pack layout, dynamic vertical constraints, and real-time `<Configure>` event listeners to calculate and wrap long path strings onto new lines automatically.
+
+---
+
+## 🛠️ Developer Makefile
+
+We have introduced a dedicated developer **`Makefile`** in the repository root to automate common tasks for both Windows (via Git Bash, MSYS2, Chocolatey) and Unix-like shells:
+
+| Command | Action |
+| :--- | :--- |
+| `make run` | Launches the WSL Linker GUI locally in Python |
+| `make build-docker` | Compiles the GUI script into `dist/WSL Linker.exe` inside an isolated Wine Docker container (keeps host system 100% clean) |
+| `make build-local` | Compiles the EXE locally using host-installed Python/PyInstaller |
+| `make clean` | Flushes out PyInstaller build caches, specs, and outputs |
+| `make status` | Quick proxy to check Git version status |
+
+---
+
+## 🔒 Security & Best Practices
+
+*   **Enable Developer Mode**: Creating symbolic links in Windows normally requires administrator elevation. To run WSL Linker and create direct links instantly without administrator popups, enable **Developer Mode** in Windows (Settings > Update & Security > For Developers).
+*   **Safe Unlinking**: Deleting directory symbolic links manually inside older versions of Windows File Explorer can occasionally result in recursive deletions inside the target WSL folder. **Always use the "Safe Remove" button or CLI command**. Our unlinker safely runs `os.rmdir` on Windows which untethers the symlink junction itself, leaving your WSL files 100% safe and untouched.
