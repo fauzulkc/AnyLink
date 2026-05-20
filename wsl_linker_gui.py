@@ -34,7 +34,14 @@ class WSLLinkerApp(ctk.CTk):
         self.title("WSL Linker - Workspace Manager")
         self.geometry("1100x700")
         self.configure(fg_color=COLOR_BG_MAIN)
-        self.minsize(1000, 600)
+        self.minsize(650, 500)
+
+        # Sidebar state management
+        self.sidebar_visible = True
+        self.user_toggled_sidebar = False
+
+        # Bind root window resize to handle dynamic responsive layout
+        self.bind("<Configure>", self.on_window_resize)
 
         # Ensure DPI awareness for ultra-crisp text on high-res screens
         try:
@@ -111,6 +118,10 @@ class WSLLinkerApp(ctk.CTk):
         subtitle_label = ctk.CTkLabel(header_frame, text="Zero-Latency Native Workspace Mappings", font=("Segoe UI", 12), text_color=COLOR_TEXT_MUTED)
         subtitle_label.pack(side=tk.LEFT, padx=10, pady=24)
 
+        # Elegant toggle button on the right side of the header (like a modern settings flyout)
+        self.btn_toggle_sidebar = ctk.CTkButton(header_frame, text="✕ Close Form", width=160, height=36, fg_color="#2b2d3a", hover_color="#3e4052", text_color=COLOR_TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda: self.toggle_sidebar(user_clicked=True))
+        self.btn_toggle_sidebar.pack(side=tk.RIGHT, padx=25, pady=20)
+
         # 2. Main Outer Layout Panel (Split Left Table List / Right Sidebar Form)
         content_frame = ctk.CTkFrame(self, fg_color="transparent")
         content_frame.pack(fill=tk.BOTH, expand=True, padx=25, pady=25)
@@ -130,22 +141,22 @@ class WSLLinkerApp(ctk.CTk):
         self.cards_container.pack(fill=tk.BOTH, expand=True)
 
         # Right Column - Sidebar Form Card
-        right_frame = ctk.CTkFrame(content_frame, fg_color=COLOR_BG_CARD, width=360, corner_radius=12, border_width=1, border_color=COLOR_BORDER)
-        right_frame.pack(fill=tk.BOTH, side=tk.RIGHT, padx=(15, 0))
-        right_frame.pack_propagate(False)
+        self.right_frame = ctk.CTkFrame(content_frame, fg_color=COLOR_BG_CARD, width=360, corner_radius=12, border_width=1, border_color=COLOR_BORDER)
+        self.right_frame.pack(fill=tk.BOTH, side=tk.RIGHT, padx=(15, 0))
+        self.right_frame.pack_propagate(False)
 
         # Form Title
-        form_title = ctk.CTkLabel(right_frame, text="Link New Workspace", font=("Segoe UI", 16, "bold"), text_color=COLOR_TEXT_PRIMARY)
+        form_title = ctk.CTkLabel(self.right_frame, text="Link New Workspace", font=("Segoe UI", 16, "bold"), text_color=COLOR_TEXT_PRIMARY)
         form_title.pack(anchor=tk.W, padx=25, pady=(25, 20))
 
         # Inputs
-        ctk.CTkLabel(right_frame, text="ALIAS NAME", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
-        self.entry_name = ctk.CTkEntry(right_frame, placeholder_text="e.g. my-project", fg_color=COLOR_BG_INPUT, border_color=COLOR_BORDER, height=40, font=("Segoe UI", 11))
+        ctk.CTkLabel(self.right_frame, text="ALIAS NAME", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
+        self.entry_name = ctk.CTkEntry(self.right_frame, placeholder_text="e.g. my-project", fg_color=COLOR_BG_INPUT, border_color=COLOR_BORDER, height=40, font=("Segoe UI", 11))
         self.entry_name.pack(fill=tk.X, padx=25, pady=(0, 15))
         self.entry_name.bind("<KeyRelease>", self.update_path_preview)
 
-        ctk.CTkLabel(right_frame, text="LOCAL PARENT WINDOWS DIRECTORY", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
-        path_row = ctk.CTkFrame(right_frame, fg_color="transparent")
+        ctk.CTkLabel(self.right_frame, text="LOCAL PARENT WINDOWS DIRECTORY", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
+        path_row = ctk.CTkFrame(self.right_frame, fg_color="transparent")
         path_row.pack(fill=tk.X, padx=25, pady=(0, 4))
         
         self.entry_win_path = ctk.CTkEntry(path_row, placeholder_text="Select parent folder (e.g. D:\\Projects)...", fg_color=COLOR_BG_INPUT, border_color=COLOR_BORDER, height=40, font=("Segoe UI", 11))
@@ -155,27 +166,27 @@ class WSLLinkerApp(ctk.CTk):
         btn_browse = ctk.CTkButton(path_row, text="Browse", width=75, height=40, fg_color="#2b2d3a", hover_color="#3e4052", text_color=COLOR_TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), command=self.browse_windows_folder)
         btn_browse.pack(side=tk.RIGHT)
 
-        path_desc = ctk.CTkLabel(right_frame, text="Your virtual symlink folder (named after the Alias) will be created inside this folder automatically.", font=("Segoe UI", 9), text_color=COLOR_TEXT_MUTED, justify=tk.LEFT, wraplength=310)
+        path_desc = ctk.CTkLabel(self.right_frame, text="Your virtual symlink folder (named after the Alias) will be created inside this folder automatically.", font=("Segoe UI", 9), text_color=COLOR_TEXT_MUTED, justify=tk.LEFT, wraplength=310)
         path_desc.pack(anchor=tk.W, padx=25, pady=(0, 15))
 
-        ctk.CTkLabel(right_frame, text="WSL TARGET DIRECTORY PATH", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
-        self.entry_wsl_path = ctk.CTkEntry(right_frame, placeholder_text="e.g. /home/user/code/my-project", fg_color=COLOR_BG_INPUT, border_color=COLOR_BORDER, height=40, font=("Segoe UI", 11))
+        ctk.CTkLabel(self.right_frame, text="WSL TARGET DIRECTORY PATH", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
+        self.entry_wsl_path = ctk.CTkEntry(self.right_frame, placeholder_text="e.g. /home/user/code/my-project", fg_color=COLOR_BG_INPUT, border_color=COLOR_BORDER, height=40, font=("Segoe UI", 11))
         self.entry_wsl_path.pack(fill=tk.X, padx=25, pady=(0, 15))
 
-        ctk.CTkLabel(right_frame, text="TARGET WSL DISTRIBUTION", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
-        self.combo_distro = ctk.CTkOptionMenu(right_frame, values=self.distros, fg_color=COLOR_BG_INPUT, button_color="#2b2d3a", button_hover_color="#3e4052", height=40, font=("Segoe UI", 11))
+        ctk.CTkLabel(self.right_frame, text="TARGET WSL DISTRIBUTION", font=("Segoe UI", 9, "bold"), text_color=COLOR_TEXT_MUTED).pack(anchor=tk.W, padx=25, pady=(0, 2))
+        self.combo_distro = ctk.CTkOptionMenu(self.right_frame, values=self.distros, fg_color=COLOR_BG_INPUT, button_color="#2b2d3a", button_hover_color="#3e4052", height=40, font=("Segoe UI", 11))
         self.combo_distro.pack(fill=tk.X, padx=25, pady=(0, 20))
 
         # Path Preview Section
-        self.lbl_preview = ctk.CTkLabel(right_frame, text="Preview: (Enter Alias and Parent Path)", font=("Segoe UI", 10, "italic"), text_color=COLOR_TEXT_MUTED, justify=tk.LEFT, wraplength=310)
+        self.lbl_preview = ctk.CTkLabel(self.right_frame, text="Preview: (Enter Alias and Parent Path)", font=("Segoe UI", 10, "italic"), text_color=COLOR_TEXT_MUTED, justify=tk.LEFT, wraplength=310)
         self.lbl_preview.pack(anchor=tk.W, padx=25, pady=(0, 20))
 
         # Submit Action
-        self.btn_add = ctk.CTkButton(right_frame, text="Create Direct Link 🔗", fg_color=COLOR_ACCENT, hover_color=COLOR_ACCENT_HOVER, height=45, font=("Segoe UI", 12, "bold"), command=self.create_link)
+        self.btn_add = ctk.CTkButton(self.right_frame, text="Create Direct Link 🔗", fg_color=COLOR_ACCENT, hover_color=COLOR_ACCENT_HOVER, height=45, font=("Segoe UI", 12, "bold"), command=self.create_link)
         self.btn_add.pack(fill=tk.X, padx=25, pady=(0, 25))
 
         # Help Card inside sidebar
-        help_card = ctk.CTkFrame(right_frame, fg_color="#181a26", corner_radius=8, border_width=1, border_color="#252a45")
+        help_card = ctk.CTkFrame(self.right_frame, fg_color="#181a26", corner_radius=8, border_width=1, border_color="#252a45")
         help_card.pack(fill=tk.BOTH, expand=True, padx=25, pady=(0, 25))
         
         help_title = ctk.CTkLabel(help_card, text="💡 Developer Tip", font=("Segoe UI", 11, "bold"), text_color=COLOR_ACCENT)
@@ -282,13 +293,8 @@ class WSLLinkerApp(ctk.CTk):
             card = ctk.CTkFrame(self.cards_container, fg_color=COLOR_BG_CARD, corner_radius=10, border_width=1, border_color=COLOR_BORDER)
             card.pack(fill=tk.X, pady=6, padx=4)
 
-            # Right side actions row (packed FIRST to protect from shrink squeezing)
-            btn_frame = ctk.CTkFrame(card, fg_color="transparent")
-            btn_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 20), pady=12)
-
-            # Left side content info (packed SECOND to expand/shrink dynamically)
+            # Left side content info (initially unpacked, packed dynamically by resize handler)
             info_frame = ctk.CTkFrame(card, fg_color="transparent")
-            info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(20, 10), pady=12)
 
             name_lbl = ctk.CTkLabel(info_frame, text=mapping["name"], font=("Segoe UI", 14, "bold"), text_color=COLOR_TEXT_PRIMARY)
             name_lbl.pack(anchor=tk.W)
@@ -297,20 +303,8 @@ class WSLLinkerApp(ctk.CTk):
             path_lbl = ctk.CTkLabel(info_frame, text=path_mapping_str, font=("Segoe UI", 10), text_color=COLOR_TEXT_MUTED, justify=tk.LEFT)
             path_lbl.pack(anchor=tk.W, pady=(2, 0), fill=tk.X, expand=True)
 
-            # Dynamic path wrapping configure handler on resize
-            def make_configure_handler(lbl, btns, c_widget):
-                def on_configure(event):
-                    if event.widget != c_widget:
-                        return
-                    btn_w = btns.winfo_reqwidth()
-                    available_w = event.width - btn_w - 70
-                    if available_w > 150:
-                        lbl.configure(wraplength=available_w)
-                    else:
-                        lbl.configure(wraplength=150)
-                return on_configure
-
-            card.bind("<Configure>", make_configure_handler(path_lbl, btn_frame, card))
+            # Right side actions row (initially unpacked, packed dynamically by resize handler)
+            btn_frame = ctk.CTkFrame(card, fg_color="transparent")
 
             # Create references to pass variables properly inside loops
             alias_name = mapping["name"]
@@ -323,6 +317,46 @@ class WSLLinkerApp(ctk.CTk):
 
             btn_del = ctk.CTkButton(btn_frame, text="🗑️ Safe Remove", width=115, height=34, fg_color="#2a1a1e", hover_color=COLOR_DANGER, text_color=COLOR_DANGER, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda a=alias_name, w=win_path, d=distro, p=wsl_path: self.delete_link(a, w, d, p))
             btn_del.pack(side=tk.LEFT, padx=4)
+
+            # Responsive layout logic based on card width
+            def make_card_resize_handler(c_frame, i_frame, b_frame, p_label):
+                current_state = {"layout": None}  # Track state to prevent layout thrashing
+                
+                def on_card_configure(event):
+                    if event.widget != c_frame:
+                        return
+                    w = event.width
+                    
+                    if w < 580:
+                        if current_state["layout"] != "compact":
+                            # Switch to stacked compact layout
+                            b_frame.pack_forget()
+                            i_frame.pack_forget()
+                            
+                            i_frame.pack(side=tk.TOP, fill=tk.X, padx=(20, 20), pady=(12, 6))
+                            b_frame.pack(side=tk.TOP, anchor=tk.W, padx=(20, 20), pady=(0, 12))
+                            current_state["layout"] = "compact"
+                        
+                        # Adjust wraplength for text wrapping in compact view
+                        p_label.configure(wraplength=w - 40)
+                    else:
+                        if current_state["layout"] != "wide":
+                            # Switch to wide side-by-side layout
+                            b_frame.pack_forget()
+                            i_frame.pack_forget()
+                            
+                            b_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 20), pady=12)
+                            i_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(20, 10), pady=12)
+                            current_state["layout"] = "wide"
+                        
+                        # Calculate exact wrapping width dynamically
+                        btn_w = b_frame.winfo_reqwidth()
+                        available_w = w - btn_w - 70
+                        p_label.configure(wraplength=max(150, available_w))
+                        
+                return on_card_configure
+
+            card.bind("<Configure>", make_card_resize_handler(card, info_frame, btn_frame, path_lbl))
 
     def create_link(self):
         """Implements safe symlink creation on form submit."""
@@ -474,6 +508,44 @@ class WSLLinkerApp(ctk.CTk):
             except Exception as e:
                 self.log(f"Failed to launch terminal: {e}", is_error=True)
                 messagebox.showerror("Launch Error", f"Failed to open a WSL terminal:\n\n{e}")
+
+    def toggle_sidebar(self, force_hide=False, force_show=False, user_clicked=False):
+        """Toggles the visibility of the link form sidebar card dynamically."""
+        if user_clicked:
+            self.user_toggled_sidebar = True
+
+        if (self.sidebar_visible or force_hide) and not force_show:
+            if not self.sidebar_visible:
+                return
+            # Hide the sidebar frame
+            self.right_frame.pack_forget()
+            # Set left frame to use full space
+            self.left_frame.pack_configure(padx=0)
+            self.btn_toggle_sidebar.configure(text="➕ Link New Workspace", fg_color=COLOR_ACCENT, hover_color=COLOR_ACCENT_HOVER)
+            self.sidebar_visible = False
+            self.log("Workspace form hidden. Mappings list expanded to full width.", is_success=True)
+        else:
+            if self.sidebar_visible:
+                return
+            # Show the sidebar frame on the right side
+            self.left_frame.pack_configure(padx=(0, 15))
+            self.right_frame.pack(fill=tk.BOTH, side=tk.RIGHT, padx=(15, 0))
+            self.btn_toggle_sidebar.configure(text="✕ Close Form", fg_color="#2b2d3a", hover_color="#3e4052")
+            self.sidebar_visible = True
+            self.log("Workspace form sidebar revealed.", is_success=True)
+
+    def on_window_resize(self, event):
+        """Automatically collapses/expands the sidebar based on window size if not user-overridden."""
+        if event.widget != self:
+            return
+        
+        w = event.width
+        # Threshold layout: below 950px, we automatically hide the sidebar to prevent cramped lists.
+        # Above 1050px, we automatically reveal it if the user hasn't explicitly closed it.
+        if w < 950 and self.sidebar_visible and not self.user_toggled_sidebar:
+            self.toggle_sidebar(force_hide=True)
+        elif w >= 1050 and not self.sidebar_visible and not self.user_toggled_sidebar:
+            self.toggle_sidebar(force_show=True)
 
 if __name__ == "__main__":
     app = WSLLinkerApp()
