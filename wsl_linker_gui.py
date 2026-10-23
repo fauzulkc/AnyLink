@@ -9,6 +9,11 @@ import tkinter as tk
 from tkinter import messagebox, filedialog
 import customtkinter as ctk
 
+# Ensure script parent directory is in sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from wsl_linker import get_registry_path, check_windows_drive_type
+
 # Set modern appearance mode and color theme
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -82,10 +87,7 @@ class WSLLinkerApp(ctk.CTk):
 
     def get_registry_path(self):
         """Get the path to the central JSON link registry in user home."""
-        home = Path.home()
-        registry_dir = home / ".wsl-linker"
-        registry_dir.mkdir(parents=True, exist_ok=True)
-        return registry_dir / "links.json"
+        return get_registry_path()
 
     def load_registry(self):
         """Load registered mappings from links.json."""
@@ -138,9 +140,9 @@ class WSLLinkerApp(ctk.CTk):
         subtitle_label = ctk.CTkLabel(header_frame, text="Zero-Latency Native Workspace Mappings", font=("Segoe UI", 12), text_color=COLOR_TEXT_MUTED)
         subtitle_label.pack(side=tk.LEFT, padx=10, pady=24)
 
-        # Elegant toggle button on the right side of the header (like a modern settings flyout)
-        self.btn_toggle_sidebar = ctk.CTkButton(header_frame, text="✕ Close Form", width=160, height=36, fg_color="#2b2d3a", hover_color="#3e4052", text_color=COLOR_TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda: self.toggle_sidebar(user_clicked=True))
-        self.btn_toggle_sidebar.pack(side=tk.RIGHT, padx=25, pady=20)
+        # Header Action Buttons
+        self.btn_toggle_sidebar = ctk.CTkButton(header_frame, text="✕ Close Form", width=145, height=36, fg_color="#2b2d3a", hover_color="#3e4052", text_color=COLOR_TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda: self.toggle_sidebar(user_clicked=True))
+        self.btn_toggle_sidebar.pack(side=tk.RIGHT, padx=(8, 25), pady=20)
 
         # 2. Main Outer Layout Panel (Split Left Table List / Right Sidebar Form)
         content_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -336,6 +338,10 @@ class WSLLinkerApp(ctk.CTk):
             distro = mapping["wsl_distro"]
             wsl_path = mapping["wsl_path"]
 
+            btn_copy_path = ctk.CTkButton(btn_frame, text="📋 Copy Path", width=105, height=34, fg_color="#1e2235", hover_color="#2b314c", text_color="#93c5fd", font=("Segoe UI", 11, "bold"), corner_radius=6)
+            btn_copy_path.configure(command=lambda p=win_path, n=alias_name, b=btn_copy_path: self.copy_path(p, n, b))
+            btn_copy_path.pack(side=tk.LEFT, padx=4)
+
             btn_term = ctk.CTkButton(btn_frame, text="💻 Open Terminal", width=120, height=34, fg_color="#22232e", hover_color="#2f3142", text_color=COLOR_TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), corner_radius=6, command=lambda a=alias_name, d=distro, p=wsl_path: self.open_linux_bash(a, d, p))
             btn_term.pack(side=tk.LEFT, padx=4)
 
@@ -356,7 +362,7 @@ class WSLLinkerApp(ctk.CTk):
                         return
                     w = event.width
                     
-                    if w < 580:
+                    if w < 680:
                         if current_state["layout"] != "compact":
                             # Switch to stacked compact layout
                             b_frame.pack_forget()
@@ -387,6 +393,20 @@ class WSLLinkerApp(ctk.CTk):
 
             card.bind("<Configure>", make_card_resize_handler(card, info_frame, btn_frame, path_lbl))
 
+    def copy_path(self, path, name, btn=None):
+        """Copies the Windows workspace path to the clipboard (paste into any IDE / agent harness)."""
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(path)
+            self.update()
+            self.log(f"Copied path for '{name}' to clipboard: {path}", is_success=True)
+            if btn:
+                orig_text = btn.cget("text")
+                btn.configure(text="✔ Copied!")
+                self.after(1400, lambda b=btn, t=orig_text: b.configure(text=t))
+        except Exception as e:
+            self.log(f"Failed to copy path to clipboard: {e}", is_error=True)
+
     def create_link(self):
         """Implements safe symlink creation on form submit."""
         name = self.entry_name.get().strip()
@@ -402,6 +422,18 @@ class WSLLinkerApp(ctk.CTk):
         if not os.path.isdir(win_parent):
             messagebox.showerror("Invalid Parent Directory", f"The local parent directory '{win_parent}' does not exist.\n\nPlease select an existing folder first.")
             return
+
+        # Check drive type safety
+        is_fixed, drive_detail = check_windows_drive_type(win_parent)
+        if not is_fixed:
+            proceed = messagebox.askyesno(
+                "Network Drive Warning",
+                f"The selected parent directory '{win_parent}' is located on a remote network or mapped drive ({drive_detail}).\n\n"
+                "Many IDEs and agent harnesses resolve network drives to UNC paths and fail path validation or file watching. A local fixed drive (such as C: or D:) is strongly recommended.\n\n"
+                "Are you sure you want to proceed anyway?"
+            )
+            if not proceed:
+                return
 
         win_path = os.path.join(win_parent, name)
         target_win_unc = f"\\\\wsl.localhost\\{distro}" + wsl_path.replace('/', '\\')
@@ -456,7 +488,7 @@ class WSLLinkerApp(ctk.CTk):
         self.save_registry(registry)
         
         self.log(f"Saved workspace mapping '{name}' to links registry.", is_success=True)
-        
+
         # Clear fields
         self.entry_name.delete(0, tk.END)
         self.entry_win_path.delete(0, tk.END)
