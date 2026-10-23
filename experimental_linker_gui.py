@@ -24,7 +24,7 @@ import time
 # Ensure script parent directory is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from wsl_linker import check_windows_drive_type
+from wsl_linker import get_registry_path, check_windows_drive_type
 
 # Theme Colors (Modern Dark Slate & Blurple/Indigo palette)
 COLOR_BG_MAIN = "#0d0e12"       # Deep dark slate
@@ -92,29 +92,58 @@ class ExperimentalLinkerApp(ctk.CTk):
 
     def load_registry(self):
         path = get_config_path()
-        if not path.exists():
-            return {"wsl_mappings": [], "docker_mappings": [], "ssh_mappings": [], "credentials": {}, "env_vars": {}, "bridge_active": False}
+        data = {"wsl_mappings": [], "docker_mappings": [], "ssh_mappings": [], "credentials": {}, "env_vars": {}, "bridge_active": False}
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        data.update(loaded)
+            except Exception:
+                pass
+
+        # Ensure all required keys exist
+        for key in ["wsl_mappings", "docker_mappings", "ssh_mappings"]:
+            if key not in data:
+                data[key] = []
+        if "credentials" not in data:
+            data["credentials"] = {}
+        if "env_vars" not in data:
+            data["env_vars"] = {}
+
+        # Merge canonical existing WSL mappings from ~/.wsl-linker/links.json
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                # Ensure all lists/dicts exist
-                for key in ["wsl_mappings", "docker_mappings", "ssh_mappings"]:
-                    if key not in data:
-                        data[key] = []
-                if "credentials" not in data:
-                    data["credentials"] = {}
-                if "env_vars" not in data:
-                    data["env_vars"] = {}
-                return data
+            canonical_path = get_registry_path()
+            if canonical_path.exists():
+                with open(canonical_path, "r", encoding="utf-8") as f:
+                    cdata = json.load(f)
+                    c_mappings = cdata.get("mappings", [])
+                    existing_names = {m.get("name", "").lower() for m in data["wsl_mappings"]}
+                    for cm in c_mappings:
+                        if cm.get("name", "").lower() not in existing_names:
+                            data["wsl_mappings"].append(cm)
+                            existing_names.add(cm.get("name", "").lower())
         except Exception:
-            return {"wsl_mappings": [], "docker_mappings": [], "ssh_mappings": [], "credentials": {}, "env_vars": {}, "bridge_active": False}
+            pass
+
+        return data
 
     def save_registry(self, data):
+        # 1. Save to experimental config
         try:
             with open(get_config_path(), "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             self.log(f"Error saving database: {e}", is_error=True)
+
+        # 2. Sync WSL mappings to canonical ~/.wsl-linker/links.json
+        try:
+            canonical_path = get_registry_path()
+            cdata = {"mappings": data.get("wsl_mappings", [])}
+            with open(canonical_path, "w", encoding="utf-8") as f:
+                json.dump(cdata, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            self.log(f"Error syncing canonical WSL registry: {e}", is_error=True)
 
     def log(self, message, is_error=False, is_success=False):
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
