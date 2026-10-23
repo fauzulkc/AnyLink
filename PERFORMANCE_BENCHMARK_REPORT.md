@@ -90,7 +90,36 @@ When source files reside on Windows host drives (`/mnt/c/` or `-v D:\proj:/works
 
 ---
 
-## 5. 📂 Benchmark Data & Reproducibility Files
+## 5. ⚡ Windows Dev Drive (ReFS) vs. AnyLink Integration Benchmarks
+
+To evaluate whether hosting workspaces on a **Windows 11 Dev Drive (ReFS)** eliminates the need for AnyLink, we conducted a 4-way empirical comparison across Windows Native NTFS, Windows Native Dev Drive, WSL cross-mounts, and AnyLink ext4 targets.
+
+Full architecture guide: [`docs/DEVDRIVE_EFFICIENCY_AND_INTEGRATION.md`](file:///D:/code/sandbox-linker/docs/DEVDRIVE_EFFICIENCY_AND_INTEGRATION.md)  
+Raw benchmark data: [`DEVDRIVE_EMPIRICAL_BENCHMARK.json`](file:///D:/code/sandbox-linker/DEVDRIVE_EMPIRICAL_BENCHMARK.json)
+
+### 5.1 Empirical 1,000 File Benchmark
+
+| Execution Tier | Storage Configuration | Total Run Time | Reads (1k) | fsync Flush (100 files) | Speedup vs Baseline |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Windows Native** | C: (NTFS) | `14.800s` | `14.256s` | — | *Baseline (Windows Host)* |
+| **Windows Native** | D: (Dev Drive ReFS) | **`0.319s`** | `0.106s` | — | ⚡ **46.3x faster** (Async AV) |
+| **WSL Cross-Mount** | `/mnt/c/` (NTFS 9P) | `12.364s` | `4.360s` | — | *Baseline (Cross-OS 9P)* |
+| **WSL Cross-Mount** | `/mnt/d/` (Dev Drive 9P) | `12.331s` | `5.358s` | — | **0.2% difference** (9P Bottleneck) |
+| **AnyLink Native ext4** | VHDX on C: (NTFS) | **`0.157s`** | `0.042s` | `0.710s` | ⚡ **78.7x faster** than `/mnt/` |
+| **AnyLink Native ext4** | VHDX on D: (Dev Drive ReFS) | **`0.147s`** | `0.039s` | **`0.624s`** | ⚡ **83.6x faster** than `/mnt/` |
+
+### 5.2 Key Conclusions: The Dev Drive Synergy
+1. **Dev Drive does NOT fix `/mnt/<drive>`:** When tools inside WSL access `/mnt/d/`, the execution time (`12.33s`) is virtually identical to `/mnt/c/` (`12.36s`). The Hyper-V 9P serialization protocol is the bottleneck, not the underlying disk.
+2. **The 'Best of Both Worlds' Synergy:** Hosting the WSL 2 `ext4.vhdx` on a Dev Drive (D:) accelerates `os.fsync` operations by **13.8%** (`0.624s` vs `0.710s`) and directory teardown by **34%** (`0.012s` vs `0.016s`), while AnyLink bridges the ext4 workspace outward to Windows IDEs with zero host pollution.
+
+---
+
+## 6. 📂 Benchmark Data & Reproducibility Files
+
+- **Dev Drive vs AnyLink Benchmark Script:** [`scripts/benchmark_devdrive_vs_sandbox.py`](file:///D:/code/sandbox-linker/scripts/benchmark_devdrive_vs_sandbox.py)
+- **Dev Drive Empirical Data:** [`DEVDRIVE_EMPIRICAL_BENCHMARK.json`](file:///D:/code/sandbox-linker/DEVDRIVE_EMPIRICAL_BENCHMARK.json)
+- **Dev Drive Efficiency Guide:** [`docs/DEVDRIVE_EFFICIENCY_AND_INTEGRATION.md`](file:///D:/code/sandbox-linker/docs/DEVDRIVE_EFFICIENCY_AND_INTEGRATION.md)
+
 
 - **Live Benchmark Script:** [`scripts/run_live_performance_proof.py`](file:///D:/code/sandbox-linker/scripts/run_live_performance_proof.py)
 - **Empirical JSON Evidence:** [`EMPIRICAL_BENCHMARK_DATA.json`](file:///D:/code/sandbox-linker/EMPIRICAL_BENCHMARK_DATA.json)

@@ -1,0 +1,52 @@
+{
+  "win_native_ntfs_c": {
+    "writes_s": 0.5036,
+    "reads_s": 14.2557,
+    "stat_s": 0.0405,
+    "total_run_s": 14.7998,
+    "destroy_s": 0.1693,
+    "file_count": 1000
+  },
+  "win_native_devdrive_d": {
+    "writes_s": 0.1774,
+    "reads_s": 0.1063,
+    "stat_s": 0.0355,
+    "total_run_s": 0.3191,
+    "destroy_s": 0.1426,
+    "file_count": 1000
+  },
+  "wsl_mnt_c_ntfs": {
+    "writes_s": 5.6342,
+    "reads_s": 4.3595,
+    "stat_s": 2.3699,
+    "total_run_s": 12.3636,
+    "destroy_s": 1.7406,
+    "file_count": 1000
+  },
+  "wsl_mnt_d_devdrive": {
+    "writes_s": 4.3983,
+    "reads_s": 5.3577,
+    "stat_s": 2.575,
+    "total_run_s": 12.3311,
+    "destroy_s": 1.3902,
+    "file_count": 1000
+  },
+  "wsl_vhdx_on_ntfs": {
+    "writes_s": 0.109,
+    "reads_s": 0.0419,
+    "stat_s": 0.0057,
+    "total_run_s": 0.1566,
+    "destroy_s": 0.0165,
+    "fsync_100_files_s": 0.71,
+    "file_count": 1000
+  },
+  "wsl_vhdx_on_devdrive": {
+    "writes_s": 0.1018,
+    "reads_s": 0.0393,
+    "stat_s": 0.0063,
+    "total_run_s": 0.1474,
+    "destroy_s": 0.0123,
+    "fsync_100_files_s": 0.6237,
+    "file_count": 1000
+  }
+}

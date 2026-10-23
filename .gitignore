@@ -14,3 +14,5 @@ test_projects/
 
 # Multi-agent teamwork scratch
 .agents/
+*.egg-info/
+scratch/

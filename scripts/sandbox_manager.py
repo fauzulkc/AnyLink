@@ -33,6 +33,17 @@ import signal
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+try:
+    from scripts.platform_driver import get_platform_driver
+except ImportError:
+    try:
+        from platform_driver import get_platform_driver
+    except ImportError:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from platform_driver import get_platform_driver
+
 SSH_KEY_NAME = "devlinker_ed25519"
 
 # Strict Alias Validation
@@ -925,9 +936,61 @@ def cmd_wsl_unlink(args: argparse.Namespace) -> int:
     print(f"[SUCCESS] WSL Link '{alias}' unlinked.")
     return 0
 
+
+def cmd_link(args: argparse.Namespace) -> int:
+    driver = get_platform_driver()
+    if driver.platform_name == "windows":
+        return cmd_wsl_link(args)
+    alias = args.name
+    target = args.target
+    parent_dir = Path(args.parent) if args.parent else Path.cwd()
+    host_path = parent_dir / alias
+    try:
+        if host_path.exists():
+            if os.path.islink(host_path):
+                os.unlink(host_path)
+            else:
+                print(f"[ERROR] Host path '{host_path}' already exists and is not a symlink.", file=sys.stderr)
+                return 1
+        os.symlink(target, host_path, target_is_directory=True)
+        db = load_registry()
+        db["wsl_mappings"] = [m for m in db["wsl_mappings"] if m.get("name", "").lower() != alias.lower()]
+        db["wsl_mappings"].append({
+            "name": alias,
+            "windows_path": str(host_path),
+            "wsl_path": target,
+            "platform": driver.platform_name
+        })
+        save_registry(db)
+        print(f"[SUCCESS] Link established: {host_path} -> {target}")
+        return 0
+    except Exception as e:
+        print(f"[ERROR] Failed to establish link: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_unlink(args: argparse.Namespace) -> int:
+    driver = get_platform_driver()
+    if driver.platform_name == "windows":
+        return cmd_wsl_unlink(args)
+    alias = args.name
+    db = load_registry()
+    target = next((m for m in db["wsl_mappings"] if m.get("name", "").lower() == alias.lower()), None)
+    if not target:
+        print(f"[ERROR] Mapping '{alias}' not found.", file=sys.stderr)
+        return 1
+    host_path = target.get("windows_path", "")
+    if host_path and os.path.islink(host_path):
+        os.unlink(host_path)
+    db["wsl_mappings"] = [m for m in db["wsl_mappings"] if m.get("name", "").lower() != alias.lower()]
+    save_registry(db)
+    print(f"[SUCCESS] Link '{alias}' unlinked.")
+    return 0
+
 # =====================================================================
 # CLI PARSER
 # =====================================================================
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sandbox_manager.py",
@@ -980,6 +1043,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_tear.add_argument("--keep-container", action="store_true", help="Keep the Docker container alive, only remove bridge & symlink")
     p_tear.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_tear.set_defaults(func=cmd_teardown)
+
+    # link (cross-platform)
+    p_link = sub.add_parser("link", help="Create a direct host link to a container or workspace (cross-platform).")
+    p_link.add_argument("-n", "--name", required=True, help="Workspace alias")
+    p_link.add_argument("-t", "--target", required=True, help="Target path inside container / Linux")
+    p_link.add_argument("-p", "--parent", default=None, help="Host parent directory")
+    p_link.add_argument("-d", "--distro", default=None, help="WSL distribution (Windows only)")
+    p_link.set_defaults(func=cmd_link)
+
+    # unlink (cross-platform)
+    p_unlink = sub.add_parser("unlink", help="Safely unlink a directory link (cross-platform).")
+    p_unlink.add_argument("name", help="Workspace alias")
+    p_unlink.set_defaults(func=cmd_unlink)
 
     # wsl-link
     p_wlink = sub.add_parser("wsl-link", help="Create a direct Windows symlink to a WSL 2 directory.")

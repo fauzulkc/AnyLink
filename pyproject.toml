@@ -3,28 +3,42 @@ requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wsl-linker"
-version = "1.0.0"
-description = "A lightweight CLI tool to natively link Windows folders to WSL 2 folders with bi-directional directory mapping and execution proxying."
+name = "anylink"
+version = "1.2.0"
+description = "Cross-Platform Zero-Latency Native Workspace Bridge & Multi-Agent Mesh for macOS, Windows (WSL 2), and Linux."
 readme = "README.md"
 authors = [
-    { name = "Fauzul", email = "fauzul@example.com" } # Placeholder email for package initialization
+    { name = "Fauzul", email = "fauzul@example.com" }
 ]
 license = { text = "MIT" }
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS :: MacOS X",
     "Operating System :: POSIX :: Linux",
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console"
 ]
-requires-python = ">=3.7"
-dependencies = []
+requires-python = ">=3.8"
+dependencies = [
+    "pyyaml>=6.0"
+]
 
 [project.urls]
 "Homepage" = "https://github.com/fauzul/wsl-linker"
 "Bug Tracker" = "https://github.com/fauzul/wsl-linker/issues"
 
 [project.scripts]
+anylink = "scripts.sandbox_manager:main"
 wsl-linker = "wsl_linker:main"
+sandbox-manager = "scripts.sandbox_manager:main"
+mesh-orchestrator = "scripts.mesh_orchestrator:main"
+manifest-transpiler = "scripts.manifest_transpiler:main"
+
+[tool.setuptools.packages.find]
+include = ["scripts*"]
+exclude = ["tests*", "test_*", "skills*", "build*", "dist*", "docs*"]
+
+[tool.setuptools]
+py-modules = ["wsl_linker", "experimental_linker", "wsl_linker_gui", "experimental_linker_gui"]

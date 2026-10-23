@@ -194,11 +194,55 @@ python scripts/sandbox_manager.py teardown <alias> --keep-container
 For existing Linux codebases that already live inside WSL 2 (e.g. in `/home/fauzul/code/...`):
 
 ```bash
-# Link WSL directory to Windows parent folder
-python scripts/sandbox_manager.py wsl-link --name my-project --target /home/fauzul/code/my-project --parent D:\code
+# Unified cross-platform link (Windows WSL, macOS, Linux)
+python scripts/sandbox_manager.py link --name my-project --target /home/user/code/my-project --parent D:\code
 
 # Safely unlink
+python scripts/sandbox_manager.py unlink my-project
+
+# Legacy WSL link/unlink (Windows only)
+python scripts/sandbox_manager.py wsl-link --name my-project --target /home/fauzul/code/my-project --parent D:\code
 python scripts/sandbox_manager.py wsl-unlink my-project
+`
+
+---
+
+## Bi-Directional Compose & Kubernetes Transpiler (manifest_transpiler.py)
+
+Transform existing production manifests into high-performance ext4 development meshes:
+
+`ash
+# 1. Transpile Docker Compose to AnyLink Mesh
+python scripts/manifest_transpiler.py compose-to-mesh -i docker-compose.yml -o mesh.json
+
+# 2. Transpile Kubernetes manifests to AnyLink Mesh
+python scripts/manifest_transpiler.py k8s-to-mesh -i deployment.yaml -o mesh.json
+
+# 3. Export modified mesh back to production Docker Compose
+python scripts/manifest_transpiler.py mesh-to-compose -i mesh.json -o docker-compose.yml
+
+# 4. Export modified mesh back to production Kubernetes manifests
+python scripts/manifest_transpiler.py mesh-to-k8s -i mesh.json -o kubernetes.yaml
+`
+
+---
+
+## Multi-Agent Development Mesh Orchestrator (mesh_orchestrator.py)
+
+Orchestrate multi-service agent development topologies with shared ext4 volume buses:
+
+`ash
+# Boot mesh defined in mesh.json
+python scripts/mesh_orchestrator.py up --file mesh.json
+
+# Run commands inside any container node in the mesh
+python scripts/mesh_orchestrator.py exec backend --file mesh.json -- python server.py
+
+# Inspect mesh status and container health
+python scripts/mesh_orchestrator.py status --file mesh.json
+
+# Clean teardown with zero orphaned resources
+python scripts/mesh_orchestrator.py down --file mesh.json
 ```
 
 ---

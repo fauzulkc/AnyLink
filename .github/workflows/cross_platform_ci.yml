@@ -1,0 +1,93 @@
+name: Cross-Platform CI & Performance Benchmark
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  matrix-test-and-benchmark:
+    name: ${{ matrix.os }} (Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # -------------------------------------------------------------
+      # OS-Specific Container Engine Initialization
+      # -------------------------------------------------------------
+      - name: Setup Docker on macOS (Colima)
+        if: runner.os == 'macOS'
+        run: |
+          brew install colima docker
+          colima start --cpu 2 --memory 4
+          docker version
+
+      - name: Verify Docker on Linux
+        if: runner.os == 'Linux'
+        run: |
+          docker version
+          docker info
+
+      - name: Verify Docker on Windows
+        if: runner.os == 'Windows'
+        run: |
+          docker version
+
+      # -------------------------------------------------------------
+      # Dependencies
+      # -------------------------------------------------------------
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
+      # -------------------------------------------------------------
+      # Test Suite 1: Cross-Platform Driver Verification
+      # -------------------------------------------------------------
+      - name: Run Platform Drivers & OS Simulation Tests
+        run: python -m unittest tests/test_platform_drivers.py
+
+      # -------------------------------------------------------------
+      # Test Suite 2: Bi-Directional Compose & K8s Transpiler
+      # -------------------------------------------------------------
+      - name: Run Manifest Transpiler & Live Orchestration Tests
+        run: python -m unittest tests/test_manifest_transpiler.py
+
+      # -------------------------------------------------------------
+      # Test Suite 3: Multi-Agent Mesh End-to-End Suite
+      # -------------------------------------------------------------
+      - name: Run Multi-Agent Mesh E2E Integration Suite
+        run: python -m unittest tests/test_mesh_e2e.py
+
+      # -------------------------------------------------------------
+      # Live Performance Benchmark & SLA Verification
+      # -------------------------------------------------------------
+      - name: Run Empirical Performance Benchmark Harness
+        run: |
+          python scripts/mesh_benchmark.py --quick
+          cat test_projects/multi_agent_mesh/BENCHMARK_REPORT.json
+
+      # -------------------------------------------------------------
+      # Upload Benchmark Artifact
+      # -------------------------------------------------------------
+      - name: Upload Benchmark Evidence Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: test_projects/multi_agent_mesh/BENCHMARK_REPORT.json
+          if-no-files-found: ignore

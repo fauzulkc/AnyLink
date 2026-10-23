@@ -1,0 +1,74 @@
+{
+  "timestamp": "2026-10-23T06:08:47Z",
+  "total_duration_seconds": 75.68,
+  "verdict": "APPROVE",
+  "stages": {
+    "stage1_memory_quota_stress": {
+      "stage": "memory_quota_stress",
+      "passed": true,
+      "hog_memory_limit": "128m",
+      "attempted_allocation_mb": 250,
+      "hog_exit_code": 137,
+      "oom_isolated_code_137": true,
+      "adjacent_container_running": true,
+      "adjacent_oom_killed": false,
+      "adjacent_exec_code": 0,
+      "adjacent_health_verified": true
+    },
+    "stage2_cpu_quota_throttling": {
+      "stage": "cpu_quota_throttling",
+      "passed": true,
+      "base_compute_seconds": 0.2654,
+      "stressed_compute_seconds": 0.2689,
+      "compute_jitter_percent": 1.32,
+      "base_http_p95_ms": 436.27,
+      "stressed_http_p95_ms": 406.42,
+      "http_jitter_percent": -6.84,
+      "http_failures": 0,
+      "jitter_under_25_pct": true,
+      "adjacent_non_starved": true
+    },
+    "stage3_concurrent_volume_writes": {
+      "stage": "concurrent_volume_writes",
+      "passed": true,
+      "writer1_exit_code": 0,
+      "writer2_exit_code": 0,
+      "valid_reads": 4459,
+      "json_corruptions": 0,
+      "hash_mismatches": 0,
+      "missing_files": 0,
+      "mid_staging_kill_exit_code": 137,
+      "post_kill_manifest_intact": true
+    },
+    "stage4_latency_thresholds": {
+      "stage": "latency_thresholds",
+      "passed": true,
+      "container_spinup": {
+        "mean_seconds": 0.6122,
+        "p95_seconds": 0.69,
+        "target_seconds": 3.0,
+        "passed": true
+      },
+      "cross_volume_io": {
+        "mean_ms": 0.2331,
+        "p95_ms": 0.3483,
+        "target_ms": 50.0,
+        "passed": true
+      },
+      "inter_service_handoff": {
+        "mean_ms": 24.3776,
+        "max_ms": 25.0585,
+        "tested_versions": 4,
+        "target_ms": 500.0,
+        "passed": true
+      }
+    },
+    "stage5_docker_daemon_hygiene": {
+      "stage": "docker_daemon_hygiene",
+      "passed": true,
+      "dangling_containers": [],
+      "dangling_volumes": [],
+      "dangling_networks": []
+    }
+  }
+}
