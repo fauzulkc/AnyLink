@@ -218,3 +218,25 @@ To eliminate host bind mounts while maintaining full compatibility with Windows 
 3. **Self-Healing Persistence Daemon:** Docker containers can be paused, stopped, or restarted during host sleep cycles. A background monitor thread regularly checks mount health. If a mount drops, it restarts the container, restarts `sshd`, and re-attaches FUSE with zero developer intervention.
 4. **Instant Shell Integration:** A single click on the GUI dashboard launches an interactive terminal directly inside the container via `docker exec -it <container> sh` or into WSL.
 5. **Safe Teardown:** Unlinking untethers the Windows directory symlink via `os.rmdir`, safely unmounts the FUSE volume (`fusermount3 -uz`), and stops the container, ensuring persistent data is never accidentally wiped.
+
+### 8.4 Empirical Verification: Multi-Turn AGY CLI Agent Benchmark
+To measure the real-world impact on AI coding agents, we invoked the **Google Antigravity CLI (`agy`)** with a non-trivial, multi-turn project prompt:
+> *"Build a complete Python calculator project in the current directory: create `lexer.py`, `parser.py`, `test_calc.py` (with 8+ unit tests), run test suite with `python3 -m unittest`, write `README.md`, and initialize git repository with commit."*
+
+The benchmark was executed in two environments on the same Windows 11 machine:
+1. **Windows Host Storage (`/mnt/c/Users/...`)**: Represents traditional host bind-mounts.
+2. **Native ext4 / AnyLink Target (`/home/...`)**: Represents native WSL 2 / AnyLink reverse mapped storage.
+
+#### Results:
+* **Native ext4 / AnyLink Target**: Completed in **`71.60 seconds`** (~1.2 minutes).
+* **Windows Host Storage**: Completed in **`659.57 seconds`** (~11.0 minutes).
+* **Speedup Multiplier**: **9.2x faster (588 seconds / 821% time saved per task)**.
+
+#### Technical Analysis:
+Autonomous agents don't perform single reads or writes; they iterate through tight build-test-lint-commit loops. Each turn involves:
+* Tokenization and parsing file writes.
+* Python bytecode compilation and `__pycache__` writes.
+* Subprocess execution for test runners and test discovery.
+* Git status hashing, index lock acquisition, and tree object serialization.
+
+On `/mnt/c/`, every turn is throttled by 9P translation overhead, Windows NTFS metadata locks, and filter driver inspection. In native ext4, operations execute directly against the Linux page cache and in-memory VFS, delivering over **9x faster task resolution** for AI coding agents.

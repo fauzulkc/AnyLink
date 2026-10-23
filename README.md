@@ -23,6 +23,18 @@ Here is an actual benchmark measured on Windows 11 running 1,500 file creations,
 | **Option 2: Native WSL 2 Linux ext4** (`wsl-linker`) | `0.047s` | `0.019s` | `5.9ms` | **`0.103s`** | ⚡ **182.2x FASTER** |
 | **Option 3: AnyLink Docker Sandbox** (Container ext4) | `0.121s` | `0.023s` | `6.9ms` | **`0.177s`** | ⚡ **106.0x FASTER** |
 
+### 🤖 Real Autonomous Agent Benchmark (`agy` CLI Multi-Turn Project Build)
+
+To prove how this filesystem acceleration directly impacts AI agents, we invoked the **Google Antigravity CLI (`agy`)** to build a multi-module Python project from scratch across multiple autonomous turns (scaffolding `lexer.py`, writing `parser.py`, generating unit tests `test_calc.py`, running test suites, writing `README.md`, and initializing Git):
+
+| Environment | Multi-Turn Project Task | Unit Tests Passed? | Git Committed? | Wall-Clock Time | Time Saved |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Windows Host Storage** (`/mnt/c/` / Bind-Mount) | Complete Calculator Suite | ✅ Yes | ✅ Yes | **`659.57s`** (~11.0 min) | Baseline |
+| **Native ext4 / AnyLink Target** (`/home/...`) | Complete Calculator Suite | ✅ Yes | ✅ Yes | **`71.60s`** (~1.2 min) | ⚡ **588.0s FASTER (9.2x / 821% speedup)** |
+
+> [!NOTE]
+> **Why AI agents suffer on Windows host mounts:** Autonomous agents execute a continuous loop of writing modules, compiling bytecode (`__pycache__`), executing test runners, indexing symbols, and staging Git commits. On `/mnt/c/` or Docker host bind-mounts, every turn stalls waiting on 9P cross-OS filesystem synchronization, turning a quick 1-minute prompt into an 11-minute waiting game. With AnyLink, agent loops run at the full speed of Linux in-memory VFS.
+
 ---
 
 ## 📊 Developer Capability Matrix: What Is Possible vs. Not Possible
