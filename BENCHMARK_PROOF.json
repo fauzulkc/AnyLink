@@ -1,0 +1,48 @@
+{
+  "benchmark_workload": "2000 file creations (writes), 2000 reads, and directory stat traversals",
+  "date": "2026-10-23 10:29:55",
+  "results": [
+    {
+      "name": "Option 1: Host Bind Mount (Docker -v)",
+      "setup_seconds": 0.4475387000020419,
+      "run_metrics": {
+        "files_count": 2000,
+        "write_seconds": 5.098771000000852,
+        "read_seconds": 21.690095999998448,
+        "stat_seconds": 2.0328430000008666,
+        "total_run_seconds": 28.821710000000166
+      },
+      "destroy_seconds": 5.891501999998582,
+      "residual_host_bytes": 0,
+      "file_lock_issues": false
+    },
+    {
+      "name": "Option 2: Native WSL 2 ext4 (wsl-linker)",
+      "setup_seconds": 0.41311960000166437,
+      "run_metrics": {
+        "files_count": 2000,
+        "write_seconds": 5.883976300003269,
+        "read_seconds": 20.268825299997843,
+        "stat_seconds": 1.5642957999989449,
+        "total_run_seconds": 27.717097400000057
+      },
+      "destroy_seconds": 0.38871110000036424,
+      "residual_host_bytes": 1000,
+      "file_lock_issues": false
+    },
+    {
+      "name": "Option 3: AnyLink Reverse Sandbox (Container ext4)",
+      "setup_seconds": 3.5026398000009067,
+      "run_metrics": {
+        "files_count": 2000,
+        "write_seconds": 19.792409800000314,
+        "read_seconds": 26.06672100000287,
+        "stat_seconds": 2.019095499999821,
+        "total_run_seconds": 47.87822630000301
+      },
+      "destroy_seconds": 1.044750600001862,
+      "residual_host_bytes": 1000,
+      "file_lock_issues": false
+    }
+  ]
+}
