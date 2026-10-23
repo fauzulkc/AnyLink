@@ -22,12 +22,14 @@ It eliminates the classic dilemma of Windows + WSL development:
 ## ✨ Key Features
 
 * ⚡ **100% Native Linux Performance:** Source code stays physically inside WSL's ext4 partition. Full speed for Git, Docker, Rust/Cargo, npm, and compiler toolchains.
-* 🤖 **Works With Any Agent Harness / IDE:** The link is a plain local-drive path (`D:\code\my-app`), so there is nothing tool-specific to configure. Verified with Google Antigravity 2.x.
+* 🐳 **Isolated Docker Reverse Sandboxes (Zero Host Pollution):** Spin up isolated Docker containers without host bind mounts. Container files are reverse-mounted into WSL via SSHFS and exposed to Windows as local symlinked paths with real-time bidirectional sync and background self-healing.
+* 🤖 **Works With Any Agent Harness / IDE:** The link is a plain local-drive path (`D:\code\my-app`), so there is nothing tool-specific to configure. Verified with Google Antigravity 2.x, Claude Desktop, Cursor, and VS Code.
 * 🛡️ **Drive Safety Check:** Warns you if you try to create a link on a network/mapped drive, which breaks path handling and file watching in many tools.
 * 🖥️ **Modern Fluent Dark GUI:** Ultra-crisp CustomTkinter dashboard with live path preview, auto-wrapping responsive cards, and dynamic WSL distribution detection.
+* 🔄 **Self-Healing Persistence Daemon:** Background engine monitors reverse Docker mounts every 20 seconds, automatically reviving SSH daemons and healing stale mounts after container restarts or sleep cycles.
 * ⌨️ **Scriptable CLI:** Comprehensive command-line interface for automation, terminal workflows, and CI scripting.
 * 📋 **One-Click Copy Path:** Copy the local Windows path of any workspace to paste into any tool's "Open Folder" dialog.
-* 💻 **Instant Context Terminal:** One-click launcher that spawns Windows Terminal logged directly into your Linux workspace directory.
+* 💻 **Instant Context Terminal:** One-click launcher that spawns Windows Terminal logged directly into your Linux workspace directory or container shell.
 * 🛡️ **Zero Data Loss Guarantee:** Safe unlinking via Windows `os.rmdir` untethers the symlink junction itself, leaving your Linux files 100% untouched and safe.
 
 ---
@@ -174,8 +176,39 @@ Because the link is resolved by Windows itself, **no tool needs special support*
 
 ---
 
+## 🐳 Isolated Docker Reverse Sandboxes (Experimental Dev Suite)
+
+For tasks requiring fully sandboxed agentic execution, clean reproducible development environments, or zero host file pollution, `wsl-linker` provides **Docker Reverse Sandbox Linking** via `experimental_linker_gui.py`.
+
+### The Problem with Traditional Dev Containers on Windows
+* **Host Bind Mounts Suffer Heavy I/O Penalties:** Traditional `docker run -v D:\project:/workspace` maps a Windows NTFS path across the Hyper-V virtualization boundary into Docker. File I/O drops by up to **8–10x**, file watching frequently drops events, and Windows file locks regularly prevent tools from cleaning up.
+* **Host OS Pollution:** All dependencies (`node_modules`, build artifacts, cache files) are written onto your Windows host drive.
+* **Volume Isolation Dilemma:** If you keep files entirely inside an isolated Docker volume for maximum Linux speed, Windows IDEs and AI agent harnesses cannot easily browse, edit, or watch the files natively.
+
+### The Reverse Docker Link Solution
+`wsl-linker` flips the dev container model inside out:
+1. **Container Runs in Complete Isolation:** A Docker container is launched with **zero host bind mounts**. All source code and dependencies live 100% inside the container's isolated Linux filesystem (`/workspace`).
+2. **Automated SSH Provisioning:** An SSH server (`sshd`) is dynamically configured inside the container, unlocked for root key authentication, with key injection (`devlinker_ed25519` generated inside WSL).
+3. **WSL FUSE Reverse Mount:** WSL mounts the container root using `sshfs` with `idmap=user,allow_other,reconnect` into `~/.devlinker-mounts/<alias>`.
+4. **Windows NTFS Symlink:** Windows creates a directory symlink `D:\code\<alias>` pointing to `\\wsl.localhost\<distro>\home\<user>\.devlinker-mounts\<alias>\workspace` (with automatic fallback to the UNC path if running unprivileged).
+5. **Real-Time Bidirectional Sync:** Windows IDEs, Cursor, and AI agents read and write directly to `D:\code\<alias>`. Changes reflect inside the running container instantaneously without host bind mounts.
+6. **Self-Healing Persistence Daemon:** A background watcher monitors the reverse mount every 20 seconds. If Docker restarts or the system wakes from sleep, it restarts the container, revives `sshd`, and heals stale FUSE mounts automatically.
+
+### Running the Experimental Dashboard
+Launch the unified tabbed dashboard:
+```bash
+python experimental_linker_gui.py
+```
+* **WSL Tab:** Link native WSL 2 directories to Windows fixed drives.
+* **Docker Tab:** Enter an alias name (e.g. `node-sandbox`), image name (e.g. `node:20-alpine`), and Windows parent directory (`D:\code`). Click **"Create Reverse Docker Sandbox"**.
+* **One-Click Shell:** Click **"💻 Open Shell"** on any Docker card to jump directly into `docker exec -it <container> sh`.
+* **Safe Teardown:** Click **"🗑 Safe Remove"** to safely unmount the FUSE volume, remove the Windows symlink, and dissolve the container without data loss.
+
+---
+
 ## 🏗️ Architecture
 
+### Mode 1: WSL 2 Direct Native Workspace Link
 ```
 +--------------------------------------------------------------------+
 |                        WINDOWS HOST (C: / D:)                      |
@@ -204,6 +237,51 @@ Because the link is resolved by Windows itself, **no tool needs special support*
 |  +--------------------------------------------------------------+  |
 |  |                                                              |  |
 |  |   ⚡ Native Build Speed (npm, cargo, git, docker, compilers) |  |
+|  +--------------------------------------------------------------+  |
++--------------------------------------------------------------------+
+```
+
+### Mode 2: Isolated Docker Reverse Sandbox Bridge
+```
++--------------------------------------------------------------------+
+|                        WINDOWS HOST (C: / D:)                      |
+|                                                                    |
+|  +--------------------+     +-----------------------------------+  |
+|  | AI Agent Harness   |     | Windows File Explorer / Editors   |  |
+|  | (any IDE / agent)  |     | (VS Code, Cursor, Antigravity)    |  |
+|  +---------+----------+     +-----------------+-----------------+  |
+|            |                                  |                    |
+|            | Opens D:\code\sandbox            |                    |
+|            v                                  v                    |
+|  +--------------------------------------------------------------+  |
+|  |           Local NTFS Directory Junction (Symlink)            |  |
+|  |           Path: D:\code\sandbox (DRIVE_FIXED)                |  |
+|  +------------------------------+-------------------------------+  |
++---------------------------------|----------------------------------+
+                                  | In-Kernel NTFS Reparse Point
+                                  | \\wsl.localhost\Ubuntu-24.04\home\user\.devlinker-mounts\sandbox\workspace
+                                  v
++--------------------------------------------------------------------+
+|                         WSL 2 LINUX VM                             |
+|                                                                    |
+|  +--------------------------------------------------------------+  |
+|  |  FUSE SSHFS Mount Point: ~/.devlinker-mounts/sandbox         |  |
+|  |  Options: idmap=user, allow_other, reconnect, port=2222     |  |
+|  |  Managed by: 🔄 Self-Healing Persistence Daemon (every 20s)   |  |
+|  +------------------------------+-------------------------------+  |
++---------------------------------|----------------------------------+
+                                  | SSHFS Tunnel (SSH Key Authenticated)
+                                  | localhost:2222 -> Container :22
+                                  v
++--------------------------------------------------------------------+
+|                  ISOLATED DOCKER DEV CONTAINER                     |
+|                                                                    |
+|  +--------------------------------------------------------------+  |
+|  |  Container Filesystem (e.g. alpine, node, python, debian)    |  |
+|  |  Workspace Path: /workspace (chmod 777)                      |  |
+|  |  Daemon: openssh-server (sshd on port 22)                    |  |
+|  |                                                              |  |
+|  |  🐳 100% Isolated: Zero Host Bind Mounts, Zero Host Pollution|  |
 |  +--------------------------------------------------------------+  |
 +--------------------------------------------------------------------+
 ```
