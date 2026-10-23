@@ -7,6 +7,18 @@ import subprocess
 import datetime
 from pathlib import Path
 
+# Safe encoding for Windows consoles
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+if hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 # ANSI colors for beautiful terminal output
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
@@ -52,6 +64,20 @@ def is_admin_windows():
     except Exception:
         return False
 
+def check_windows_drive_type(win_path):
+    """Verify that the destination drive is a local fixed drive (DRIVE_FIXED)."""
+    if os.name != 'nt':
+        return True, "non-windows"
+    import ctypes
+    root = os.path.splitdrive(os.path.abspath(win_path))[0] + "\\"
+    drive_type = ctypes.windll.kernel32.GetDriveTypeW(root)
+    # 3: DRIVE_FIXED, 4: DRIVE_REMOTE
+    if drive_type == 4:
+        return False, "remote_network"
+    elif drive_type == 3:
+        return True, "local_fixed"
+    return True, f"type_{drive_type}"
+
 def add_link(args):
     """Create a new symbolic link and save it to the registry."""
     win_path = os.path.abspath(args.windows_path)
@@ -72,6 +98,14 @@ def add_link(args):
         if os.path.abspath(mapping["windows_path"]).lower() == win_path.lower():
             print(f"{RED}Error: Local path '{win_path}' is already linked to '{mapping['wsl_path']}'.{RESET}")
             return
+
+    # Check drive type on Windows
+    is_fixed, drive_desc = check_windows_drive_type(win_path)
+    if not is_fixed:
+        print(f"{YELLOW}Warning: Destination drive is a network or remote drive ({drive_desc}).{RESET}")
+        print(f"{YELLOW}Network drives are resolved to UNC paths (\\\\wsl.localhost\\...) by many tools,{RESET}")
+        print(f"{YELLOW}and file watchers/path validation often fail on them (IDEs, agent harnesses, etc.).{RESET}")
+        print(f"{YELLOW}For best compatibility, use a local fixed drive (such as D:\\ or C:\\).{RESET}")
 
     # Target path in Windows for symbolic link creation
     target_win_unc = f"\\\\wsl.localhost\\{distro}" + wsl_path.replace('/', '\\')
@@ -102,10 +136,8 @@ def add_link(args):
     # Perform Symbolic Link Creation
     try:
         if os.name == 'nt':
-            # Create directory symlink in Windows
             os.symlink(target_win_unc, win_path, target_is_directory=True)
         else:
-            # Unix-like fallback
             os.symlink(wsl_path, win_path)
         print(f"{GREEN}✔ Directory symbolic link created successfully!{RESET}")
     except PermissionError:
@@ -129,6 +161,7 @@ def add_link(args):
     registry["mappings"].append(new_mapping)
     save_registry(registry)
     print(f"{GREEN}✔ Saved link '{name}' to mappings registry.{RESET}")
+    print(f"{GREEN}✔ Open this folder in any IDE or agent harness: {BOLD}{win_path}{RESET}")
 
 def remove_link(args):
     """Safely delete the symbolic link and remove it from the registry."""
@@ -142,7 +175,6 @@ def remove_link(args):
             break
 
     if not match:
-        # Fallback to direct path deletion if symlink exists but is not registered
         if os.path.exists(target) and os.path.islink(target):
             win_path = os.path.abspath(target)
             print(f"{YELLOW}Warning: Path is a symbolic link but not found in the registry. Attempting direct removal...{RESET}")
@@ -158,11 +190,10 @@ def remove_link(args):
             print(f"{RED}Safety Error: '{win_path}' is a normal directory, not a symbolic link!{RESET}")
             print(f"{YELLOW}Aborting to prevent accidental data deletion.{RESET}")
             return
-        
+
         try:
             print(f"{CYAN}Safely removing Windows symbolic link: {BOLD}{win_path}{RESET}")
             if os.name == 'nt':
-                # os.rmdir safely deletes the directory symbolic link, leaving target folder untouched
                 os.rmdir(win_path)
             else:
                 os.unlink(win_path)
@@ -179,7 +210,7 @@ def remove_link(args):
         print(f"{GREEN}✔ Removed '{match['name']}' registry entry.{RESET}")
 
 def list_links(args):
-    """Print the registry links map in a beautiful layout."""
+    """Print the registry links map."""
     registry = load_registry()
     mappings = registry["mappings"]
 
@@ -190,10 +221,10 @@ def list_links(args):
 
     print(f"\n{BOLD}{GREEN}WSL Linker Registry Mappings{RESET}")
     print("=" * 110)
-    print(f"{BOLD}{'Name':<20} | {'Windows Path':<40} | {'Distro':<15} | {'WSL Target Path':<25}{RESET}")
+    print(f"{BOLD}{'Name':<20} | {'Windows Path':<38} | {'Distro':<14} | {'WSL Target Path'}{RESET}")
     print("-" * 110)
     for m in mappings:
-        print(f"{m['name']:<20} | {m['windows_path']:<40} | {m['wsl_distro']:<15} | {m['wsl_path']:<25}")
+        print(f"{m['name']:<20} | {m['windows_path']:<38} | {m['wsl_distro']:<14} | {m['wsl_path']}")
     print("=" * 110)
     print(f"Config path: {get_registry_path()}\n")
 
@@ -203,7 +234,6 @@ def run_command(args):
     registry = load_registry()
     match = None
 
-    # Find which mapped link our current directory belongs to
     for mapping in registry["mappings"]:
         win_path = os.path.abspath(mapping["windows_path"])
         if current_dir.lower() == win_path.lower() or current_dir.lower().startswith(win_path.lower() + os.sep):
@@ -215,12 +245,10 @@ def run_command(args):
         print("Please navigate to a linked workspace or register one using 'wsl-linker add'.")
         return
 
-    # Translate the directory path relative to the symlink root
     win_root = os.path.abspath(match["windows_path"])
     relative = current_dir[len(win_root):].replace('\\', '/')
     guest_target_dir = (match["wsl_path"] + relative).replace('//', '/')
-    
-    # Extract command arguments
+
     command = " ".join(args.cmd_args)
     if not command:
         print(f"{RED}Error: Please specify a command to execute inside WSL.{RESET}")
@@ -230,7 +258,6 @@ def run_command(args):
     print(f"{CYAN}[wsl-linker] Executing inside {match['wsl_distro']} ({guest_target_dir}):{RESET}")
     print(f"{BOLD}> {command}{RESET}\n")
 
-    # Call WSL to execute the proxied command
     try:
         wsl_exec = ["wsl", "-d", match["wsl_distro"], "-e", "bash", "-c", f"cd '{guest_target_dir}' && {command}"]
         result = subprocess.run(wsl_exec)
@@ -241,17 +268,17 @@ def run_command(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="WSL Linker - Open Source Windows to WSL Directory Symlinker and Proxy Runner",
+        description="WSL Linker - Open Source Windows to WSL Directory Symlinker",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 {BOLD}Examples:{RESET}
-  wsl-linker add D:\\projects\\workspace /home/fauzul/projects/fauzul --distro Ubuntu-24.04
+  wsl-linker add D:\\code\\my-project /home/user/code/my-project --distro Ubuntu-24.04
   wsl-linker list
   wsl-linker run npm install
-  wsl-linker remove my-workspace
+  wsl-linker remove my-project
         """
     )
-    
+
     subparsers = parser.add_subparsers(title="commands", dest="command", required=True)
 
     # ADD Command
