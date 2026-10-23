@@ -19,19 +19,61 @@ Architecture:
 import os
 import sys
 import json
+import re
+import shlex
 import socket
 import time
 import datetime
 import argparse
 import subprocess
+import tempfile
+import shutil
+import atexit
+import signal
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 SSH_KEY_NAME = "devlinker_ed25519"
 
+# Strict Alias Validation
+ALIAS_REGEX = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$")
+
+def validate_alias(alias: str) -> bool:
+    """
+    Validates alias to prevent command injection, traversal, and invalid Docker names.
+    Format required: ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$
+    """
+    if not isinstance(alias, str):
+        return False
+    return bool(ALIAS_REGEX.fullmatch(alias))
+
+# Resilience: In-flight container cleanup hook
+_pending_containers: set = set()
+
+def _cleanup_pending_containers():
+    for cname in list(_pending_containers):
+        try:
+            subprocess.run(["docker", "rm", "-f", cname], capture_output=True, timeout=10)
+        except Exception:
+            pass
+    _pending_containers.clear()
+
+atexit.register(_cleanup_pending_containers)
+
+def _sig_handler(signum, frame):
+    _cleanup_pending_containers()
+    sys.exit(128 + signum)
+
+try:
+    signal.signal(signal.SIGINT, _sig_handler)
+    signal.signal(signal.SIGTERM, _sig_handler)
+except Exception:
+    pass
+
 # Configuration Paths
 def get_experimental_dir() -> Path:
-    p = Path.home() / ".wsl-linker-experimental"
+    env_dir = os.environ.get("WSL_LINKER_EXPERIMENTAL_DIR")
+    p = Path(env_dir) if env_dir else Path.home() / ".wsl-linker-experimental"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -39,9 +81,29 @@ def get_config_path() -> Path:
     return get_experimental_dir() / "config.json"
 
 def get_canonical_registry_path() -> Path:
-    p = Path.home() / ".wsl-linker"
+    env_dir = os.environ.get("WSL_LINKER_CONFIG_DIR")
+    p = Path(env_dir) if env_dir else Path.home() / ".wsl-linker"
     p.mkdir(parents=True, exist_ok=True)
     return p / "links.json"
+
+def _atomic_write_json(file_path: Path, data: Any) -> None:
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    dir_path = file_path.parent
+    temp_file = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, encoding="utf-8") as f:
+            temp_file = f.name
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_file, file_path)
+        temp_file = None
+    finally:
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
 
 def load_registry() -> Dict[str, Any]:
     path = get_config_path()
@@ -59,8 +121,15 @@ def load_registry() -> Dict[str, Any]:
                 loaded = json.load(f)
                 if isinstance(loaded, dict):
                     data.update(loaded)
-        except Exception:
-            pass
+                else:
+                    raise ValueError(f"Root JSON entity in '{path}' must be an object")
+        except Exception as e:
+            bak_path = path.with_name(path.name + ".corrupt.bak")
+            try:
+                shutil.copy2(path, bak_path)
+            except Exception:
+                pass
+            raise RuntimeError(f"Corrupt registry at '{path}': {e}. Backup created at '{bak_path}'") from e
 
     for key in ["wsl_mappings", "docker_mappings", "ssh_mappings"]:
         if key not in data:
@@ -71,33 +140,39 @@ def load_registry() -> Dict[str, Any]:
         data["env_vars"] = {}
 
     # Sync canonical WSL mappings
-    try:
-        canonical_path = get_canonical_registry_path()
-        if canonical_path.exists():
+    canonical_path = get_canonical_registry_path()
+    if canonical_path.exists():
+        try:
             with open(canonical_path, "r", encoding="utf-8") as f:
                 cdata = json.load(f)
-                c_mappings = cdata.get("mappings", [])
-                existing_names = {m.get("name", "").lower() for m in data["wsl_mappings"]}
-                for cm in c_mappings:
-                    if cm.get("name", "").lower() not in existing_names:
-                        data["wsl_mappings"].append(cm)
-                        existing_names.add(cm.get("name", "").lower())
-    except Exception:
-        pass
+                if isinstance(cdata, dict):
+                    c_mappings = cdata.get("mappings", [])
+                    existing_names = {m.get("name", "").lower() for m in data["wsl_mappings"]}
+                    for cm in c_mappings:
+                        if cm.get("name", "").lower() not in existing_names:
+                            data["wsl_mappings"].append(cm)
+                            existing_names.add(cm.get("name", "").lower())
+                else:
+                    raise ValueError(f"Root JSON entity in '{canonical_path}' must be an object")
+        except Exception as e:
+            bak_path = canonical_path.with_name(canonical_path.name + ".corrupt.bak")
+            try:
+                shutil.copy2(canonical_path, bak_path)
+            except Exception:
+                pass
+            raise RuntimeError(f"Corrupt canonical registry at '{canonical_path}': {e}. Backup created at '{bak_path}'") from e
 
     return data
 
 def save_registry(data: Dict[str, Any]) -> None:
     # 1. Experimental config
-    with open(get_config_path(), "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _atomic_write_json(get_config_path(), data)
 
     # 2. Canonical WSL registry
     try:
         canonical_path = get_canonical_registry_path()
         cdata = {"mappings": data.get("wsl_mappings", [])}
-        with open(canonical_path, "w", encoding="utf-8") as f:
-            json.dump(cdata, f, indent=2, ensure_ascii=False)
+        _atomic_write_json(canonical_path, cdata)
     except Exception:
         pass
 
@@ -151,13 +226,20 @@ def ensure_wsl_ssh_key(distro: str) -> str:
     return pub
 
 def find_free_port(db: Dict[str, Any]) -> int:
-    used = {m.get("ssh_port") for m in db.get("docker_mappings", []) if m.get("ssh_port")}
+    used = set()
+    for m in db.get("docker_mappings", []):
+        p = m.get("ssh_port")
+        if p is not None:
+            try:
+                used.add(int(p))
+            except (ValueError, TypeError):
+                pass
     for port in range(2222, 2322):
         if port in used:
             continue
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.bind(("0.0.0.0", port))
+                s.bind(("127.0.0.1", port))
             except OSError:
                 continue
         return port
@@ -195,12 +277,17 @@ def sshfs_mount_script(port: int, mount_path: str) -> str:
     key = f"$HOME/.ssh/{SSH_KEY_NAME}"
     opts = (
         f"IdentityFile={key},port={port},StrictHostKeyChecking=no,UserKnownHostsFile=/dev/null,"
-        "reconnect,ServerAliveInterval=10,ServerAliveCountMax=3,idmap=user,allow_other,BatchMode=yes"
+        "reconnect,ServerAliveInterval=10,ServerAliveCountMax=3,idmap=user,allow_other,BatchMode=yes,"
+        "kernel_cache,auto_cache,entry_timeout=60,attr_timeout=60,big_writes,max_read=131072,max_write=131072,compression=no"
     )
+    # FUSE 3 (Ubuntu 22.04+) deprecated/removed 'big_writes'; fall back if rejected
+    opts_compat = opts.replace("big_writes,", "").replace(",big_writes", "")
+    q_mount = shlex.quote(mount_path)
     return (
-        f'M="{mount_path}"; mkdir -p "$M"; '
+        f'M={q_mount}; mkdir -p "$M"; '
         f'(fusermount3 -uz "$M" || fusermount -uz "$M") >/dev/null 2>&1; '
-        f'sshfs -o {opts} root@127.0.0.1:/ "$M"'
+        f'sshfs -o {opts} root@127.0.0.1:/ "$M" 2>/dev/null || '
+        f'sshfs -o {opts_compat} root@127.0.0.1:/ "$M"'
     )
 
 def setup_wsl_sshfs_mount(distro: str, port: int, wsl_mount_path: str) -> bool:
@@ -220,12 +307,18 @@ def setup_wsl_sshfs_mount(distro: str, port: int, wsl_mount_path: str) -> bool:
     else:
         return False
 
-    v = wsl_run(distro, f'ls "{wsl_mount_path}/workspace" >/dev/null', timeout=30)
+    q_ws = shlex.quote(f"{wsl_mount_path}/workspace")
+    v = wsl_run(distro, f'ls {q_ws} >/dev/null', timeout=30)
     return v.returncode == 0
 
 def unmount_wsl_sshfs(distro: str, wsl_mount_path: str) -> None:
     try:
-        wsl_run(distro, f'(fusermount3 -uz "{wsl_mount_path}" || fusermount -uz "{wsl_mount_path}") >/dev/null 2>&1; rmdir "{wsl_mount_path}" 2>/dev/null; true', timeout=30)
+        q_mount = shlex.quote(wsl_mount_path)
+        wsl_run(
+            distro,
+            f'M={q_mount}; (fusermount3 -uz "$M" || fusermount -uz "$M") >/dev/null 2>&1; rmdir "$M" 2>/dev/null; true',
+            timeout=30
+        )
     except Exception:
         pass
 
@@ -240,6 +333,14 @@ def cmd_create(args: argparse.Namespace) -> int:
 
     if not alias:
         print("[ERROR] Sandbox name (--name / -n) is required.", file=sys.stderr)
+        return 1
+
+    if not validate_alias(alias):
+        err = f"Invalid sandbox alias '{alias}'. Must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]{{0,62}}$ (alphanumeric start, allowed: letters, digits, _, ., -, max 63 chars)."
+        if args.json:
+            print(json.dumps({"status": "error", "message": err}))
+        else:
+            print(f"[ERROR] {err}", file=sys.stderr)
         return 1
 
     win_path = os.path.join(parent, alias)
@@ -274,6 +375,17 @@ def cmd_create(args: argparse.Namespace) -> int:
         print(f"    - SSH Tunnel Port : {port}")
         print(f"    - WSL Distro      : {distro}")
         print(f"    - Windows Target  : {win_path}")
+        if getattr(args, "cpus", None):
+            print(f"    - CPU Limit       : {args.cpus} cores")
+        if getattr(args, "memory", None):
+            print(f"    - Memory Limit    : {args.memory}")
+        if getattr(args, "pids_limit", None):
+            print(f"    - Max Processes   : {args.pids_limit} PIDs")
+        if getattr(args, "volume", None):
+            print(f"    - Volumes Mounted : {', '.join(args.volume)}")
+
+    # Track in-flight container for signal/atexit cleanup
+    _pending_containers.add(container_name)
 
     # Launch Container
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
@@ -281,9 +393,65 @@ def cmd_create(args: argparse.Namespace) -> int:
         "docker", "run", "-d",
         "--name", container_name,
         "--restart", "unless-stopped",
-        "-p", f"{port}:22",
+        "-p", f"127.0.0.1:{port}:22",
         "-w", "/workspace",
     ]
+
+    # Resource throttling & cgroup limits
+    if getattr(args, "cpus", None) is not None:
+        try:
+            c = float(args.cpus)
+            if c <= 0:
+                raise ValueError("Must be positive")
+            docker_cmd.extend(["--cpus", str(args.cpus)])
+        except ValueError:
+            err = f"Invalid --cpus value '{args.cpus}'. Must be a positive number (e.g. 1.5, 2.0)."
+            if args.json:
+                print(json.dumps({"status": "error", "message": err}))
+            else:
+                print(f"[ERROR] {err}", file=sys.stderr)
+            return 1
+
+    if getattr(args, "memory", None) is not None:
+        mem_str = str(args.memory).strip()
+        if not re.match(r"^[1-9][0-9]*[bkmgBKMG]$", mem_str):
+            err = f"Invalid --memory value '{args.memory}'. Format must be <num>[b|k|m|g] (e.g. 512m, 2g)."
+            if args.json:
+                print(json.dumps({"status": "error", "message": err}))
+            else:
+                print(f"[ERROR] {err}", file=sys.stderr)
+            return 1
+        docker_cmd.extend(["--memory", mem_str.lower(), "--memory-swap", mem_str.lower()])
+
+    if getattr(args, "pids_limit", None) is not None:
+        try:
+            p = int(args.pids_limit)
+            if p <= 0:
+                raise ValueError("Must be positive")
+            docker_cmd.extend(["--pids-limit", str(p)])
+        except ValueError:
+            err = f"Invalid --pids-limit value '{args.pids_limit}'. Must be a positive integer."
+            if args.json:
+                print(json.dumps({"status": "error", "message": err}))
+            else:
+                print(f"[ERROR] {err}", file=sys.stderr)
+            return 1
+
+    # Volume mounting (named volumes or container paths)
+    if getattr(args, "volume", None):
+        for vol in args.volume:
+            vol = str(vol).strip()
+            if not vol:
+                continue
+            docker_cmd.extend(["-v", vol])
+
+    # Storage options (disk quotas)
+    if getattr(args, "storage_opt", None):
+        for sopt in args.storage_opt:
+            sopt = str(sopt).strip()
+            if not sopt:
+                continue
+            docker_cmd.extend(["--storage-opt", sopt])
 
     # Environment variables
     if args.env:
@@ -298,6 +466,7 @@ def cmd_create(args: argparse.Namespace) -> int:
 
     res = subprocess.run(docker_cmd, capture_output=True, text=True)
     if res.returncode != 0:
+        _pending_containers.discard(container_name)
         err = f"Docker container run failed: {res.stderr.strip()}"
         if args.json:
             print(json.dumps({"status": "error", "message": err}))
@@ -308,6 +477,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     # Container SSH setup
     if not setup_container_ssh(container_name, distro):
         subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
+        _pending_containers.discard(container_name)
         err = "Failed to configure SSH and authorized_keys inside container."
         if args.json:
             print(json.dumps({"status": "error", "message": err}))
@@ -319,6 +489,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     try:
         if not setup_wsl_sshfs_mount(distro, port, wsl_mount_path):
             subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
+            _pending_containers.discard(container_name)
             err = "Failed to establish SSHFS mount from WSL."
             if args.json:
                 print(json.dumps({"status": "error", "message": err}))
@@ -327,17 +498,19 @@ def cmd_create(args: argparse.Namespace) -> int:
             return 1
     except Exception as e:
         subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
+        _pending_containers.discard(container_name)
         if args.json:
             print(json.dumps({"status": "error", "message": str(e)}))
         else:
             print(f"[ERROR] {e}", file=sys.stderr)
         return 1
 
-    # Windows symlink
-    wsl_unc = f"\\\\wsl.localhost\\{distro}" + f"{wsl_mount_path}/workspace".replace("/", "\\")
+    # Windows symlink with normalized UNC path
+    normalized_mnt = "/" + f"{wsl_mount_path}/workspace".replace('\\', '/').lstrip('/')
+    wsl_unc = f"\\\\wsl.localhost\\{distro}" + normalized_mnt.replace("/", "\\")
     symlink_ok = False
     try:
-        if os.path.exists(win_path) or os.path.islink(win_path):
+        if win_path and os.path.islink(win_path):
             os.rmdir(win_path)
         os.symlink(wsl_unc, win_path, target_is_directory=True)
         symlink_ok = True
@@ -349,6 +522,13 @@ def cmd_create(args: argparse.Namespace) -> int:
     # Save to registry
     # Remove any existing record for this name
     db["docker_mappings"] = [m for m in db["docker_mappings"] if m.get("name", "").lower() != alias.lower()]
+    resource_info = {
+        "cpus": getattr(args, "cpus", None),
+        "memory": getattr(args, "memory", None),
+        "pids_limit": getattr(args, "pids_limit", None),
+        "volumes": getattr(args, "volume", None) or [],
+        "storage_opt": getattr(args, "storage_opt", None) or [],
+    }
     mapping = {
         "name": alias,
         "container_name": container_name,
@@ -360,10 +540,12 @@ def cmd_create(args: argparse.Namespace) -> int:
         "wsl_unc_path": wsl_unc,
         "windows_path": win_path,
         "symlink_created": symlink_ok,
+        "resources": resource_info,
         "created_at": datetime.datetime.now().isoformat()
     }
     db["docker_mappings"].append(mapping)
     save_registry(db)
+    _pending_containers.discard(container_name)
 
     result_data = {
         "status": "success",
@@ -376,6 +558,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         "wsl_distro": distro,
         "wsl_mount_path": wsl_mount_path,
         "symlink_created": symlink_ok,
+        "resources": resource_info,
         "link_type": "reverse"
     }
 
@@ -597,7 +780,8 @@ def cmd_heal(args: argparse.Namespace) -> int:
             time.sleep(2)
 
         # Check mount
-        healthy = wsl_run(distro, f'timeout 5 ls "{mnt}/workspace" >/dev/null 2>&1', timeout=10).returncode == 0
+        q_ws = shlex.quote(f"{mnt}/workspace")
+        healthy = wsl_run(distro, f'timeout 5 ls {q_ws} >/dev/null 2>&1', timeout=10).returncode == 0
         if not healthy:
             print(f"    -> Mount stale. Relaunching container sshd & remounting...")
             subprocess.run(["docker", "exec", cname, "sh", "-c", "/usr/sbin/sshd 2>/dev/null; true"], capture_output=True)
@@ -634,8 +818,8 @@ def cmd_teardown(args: argparse.Namespace) -> int:
     if not args.json:
         print(f"[*] Tearing down sandbox '{alias}'...")
 
-    # 1. Remove Windows Symlink safely (NEVER recursive rmtree)
-    if win_path and (os.path.islink(win_path) or os.path.isdir(win_path)):
+    # 1. Remove Windows Symlink safely (ONLY remove if islink, NEVER regular directories)
+    if win_path and os.path.islink(win_path):
         try:
             os.rmdir(win_path)
             if not args.json:
@@ -643,6 +827,9 @@ def cmd_teardown(args: argparse.Namespace) -> int:
         except Exception as e:
             if not args.json:
                 print(f"    [WARN] Symlink removal failed: {e}")
+    elif win_path and os.path.exists(win_path):
+        if not args.json:
+            print(f"    [WARN] Target '{win_path}' is a regular directory/file, skipping removal for safety.", file=sys.stderr)
 
     # 2. Unmount SSHFS in WSL
     if distro and mnt:
@@ -680,6 +867,11 @@ def cmd_wsl_link(args: argparse.Namespace) -> int:
     parent = os.path.abspath(args.parent) if args.parent else os.getcwd()
     distro = args.distro.strip() if args.distro else detect_default_distro()
 
+    if not validate_alias(alias):
+        print(f"[ERROR] Invalid alias '{alias}'. Must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]{{0,62}}$.", file=sys.stderr)
+        return 1
+
+    target = "/" + target.replace('\\', '/').lstrip('/')
     win_path = os.path.join(parent, alias)
     wsl_unc = f"\\\\wsl.localhost\\{distro}" + target.replace('/', '\\')
 
@@ -720,11 +912,13 @@ def cmd_wsl_unlink(args: argparse.Namespace) -> int:
         return 1
 
     win_path = target.get("windows_path", "")
-    if win_path and (os.path.islink(win_path) or os.path.isdir(win_path)):
+    if win_path and os.path.islink(win_path):
         try:
             os.rmdir(win_path)
         except Exception as e:
             print(f"[WARN] Failed to remove link: {e}")
+    elif win_path and os.path.exists(win_path):
+        print(f"[WARN] Target '{win_path}' is a regular directory, skipping removal for safety.", file=sys.stderr)
 
     db["wsl_mappings"] = [m for m in db["wsl_mappings"] if m.get("name", "").lower() != alias.lower()]
     save_registry(db)
@@ -748,6 +942,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_create.add_argument("-p", "--parent", default=None, help="Windows parent folder to project symlink (default: current working directory)")
     p_create.add_argument("-d", "--distro", default=None, help="WSL 2 distribution for SSHFS bridge (default: autodetected Ubuntu)")
     p_create.add_argument("-e", "--env", action="append", help="Environment variables (KEY=VALUE), can repeat")
+    p_create.add_argument("--cpus", default=None, help="Limit CPU cores available to container (e.g. 1.5, 2.0)")
+    p_create.add_argument("-m", "--memory", default=None, help="Limit container RAM ceiling (e.g. 512m, 2g, 4g)")
+    p_create.add_argument("--pids-limit", type=int, default=None, help="Limit maximum container process IDs to prevent fork bombs")
+    p_create.add_argument("-v", "--volume", action="append", help="Mount Docker volume (e.g. my_vol:/workspace or named_vol:/data), can repeat")
+    p_create.add_argument("--storage-opt", action="append", help="Storage driver options (e.g. size=10G), can repeat")
     p_create.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_create.set_defaults(func=cmd_create)
 

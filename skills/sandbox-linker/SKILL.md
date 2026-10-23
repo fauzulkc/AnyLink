@@ -91,6 +91,11 @@ python scripts/sandbox_manager.py create --name <alias> --image <docker_image> -
 - `-p`, `--parent`: Windows parent folder (e.g. `-p "D:\code"`). Defaults to current working directory.
 - `-d`, `--distro`: WSL 2 distribution for SSHFS bridge (defaults to autodetected `Ubuntu-24.04`).
 - `-e`, `--env`: Inject environment variables into the container (e.g. `-e API_KEY=xyz -e NODE_ENV=development`).
+- `--cpus`: Limit CPU cores available to container (e.g. `--cpus 2.0`). Protects host from runaway compilation/infinite loops.
+- `-m`, `--memory`: Hard-caps container RAM ceiling (e.g. `-m 512m`, `-m 2g`). Triggers in-container OOM-killer if exceeded, preventing Windows host freezes.
+- `--pids-limit`: Maximum active container processes (e.g. `--pids-limit 100`). Protects against fork bombs or recursive script explosions.
+- `-v`, `--volume`: Mount named Docker volumes (e.g. `-v my_vol:/workspace`) or secondary container volumes (`-v cache:/cache`).
+- `--storage-opt`: Enforce disk quotas via Docker storage options (e.g. `--storage-opt size=10G`).
 
 **Example:**
 ```bash
