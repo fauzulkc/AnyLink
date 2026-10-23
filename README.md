@@ -1,467 +1,326 @@
-# 🚀 WSL Linker (`wsl-linker` / AnyLink)
+# WSL Linker (AnyLink)
 
-### Zero-Latency Native Windows Workspace Manager for WSL 2 & Isolated Docker Sandboxes
-**Make any WSL or Docker container folder look like a normal local Windows folder, so every IDE and AI agent harness can open it.**
+High-performance workspace bridges for WSL 2 and isolated Docker containers on Windows.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20%7C%20WSL%202-blue.svg)]()
-[![Performance](https://img.shields.io/badge/Speedup-106x--182x%20Faster-emerald.svg)]()
+[![Speedup](https://img.shields.io/badge/I%2FO%20Speedup-106x--254x-emerald.svg)](PERFORMANCE_BENCHMARK_REPORT.md)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)]()
 
 ---
 
-## ⚡ Live Performance Benchmark (1,500 File I/O Operations)
+## Concept and Architecture Flow
 
-> [!TIP]
-> **Why this project exists:** Storing repositories on Windows host drives (`/mnt/c/` or Docker host bind-mounts `-v D:\proj:/workspace`) forces every file read, write, and stat call across the Hyper-V / 9P virtualization boundary. Storing code inside Linux ext4 unlocks **over 100x–180x faster** execution.
+Developing on Windows with Linux tools usually forces an unacceptable trade-off:
 
-Here is an actual benchmark measured on Windows 11 running 1,500 file creations, reads, directory traversals, and deletions:
+* **Host storage (`/mnt/c` or Docker bind-mounts):**
+  `Windows NTFS -> Hyper-V 9P -> Linux/Container`
+  Slow. File operations suffer a 100x+ virtualization penalty. Package managers (`npm`, `cargo`) stall, and file locks block directory cleanup.
+* **Internal Linux storage (`\\wsl.localhost\...` or container volumes):**
+  `Container/WSL ext4 -> Windows UNC path`
+  Fast execution, but breaks host tools. Windows IDEs and AI agent harnesses mis-parse UNC paths, drop file-watching events, or cannot access files trapped in container volumes.
 
-| Environment / Approach | File Writes (1.5k) | File Reads (1.5k) | Stat / Walk | Total Time | Speedup Multiplier |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Option 1: Windows Host Storage** (`/mnt/c` or Docker Bind-Mount) | `7.460s` | `5.973s` | `3005.1ms` | **`18.720s`** | Baseline (1x) |
-| **Option 2: Native WSL 2 Linux ext4** (`wsl-linker`) | `0.047s` | `0.019s` | `5.9ms` | **`0.103s`** | ⚡ **182.2x FASTER** |
-| **Option 3: AnyLink Docker Sandbox** (Container ext4) | `0.121s` | `0.023s` | `6.9ms` | **`0.177s`** | ⚡ **106.0x FASTER** |
+### The AnyLink Bridge Flow
 
-### 🤖 Real Autonomous Agent Benchmark (`agy` CLI Multi-Turn Project Build)
+AnyLink combines in-kernel NTFS directory junctions, WSL 9P, and reverse SSHFS tunnels:
 
-To prove how this filesystem acceleration directly impacts AI agents, we invoked the **Google Antigravity CLI (`agy`)** to build a multi-module Python project from scratch across multiple autonomous turns (scaffolding `lexer.py`, writing `parser.py`, generating unit tests `test_calc.py`, running test suites, writing `README.md`, and initializing Git):
+```
+[Windows Host IDE / AI Agent]
+            |
+            | Reads/writes local path: D:\code\<project> (DRIVE_FIXED)
+            v
+[NTFS Directory Junction]
+            |
+            | In-kernel reparse: \\wsl.localhost\<distro>\...
+            v
+[WSL 2 Linux ext4] ---------------------------------------------+
+            |                                                   |
+            | Mode 1: Direct native ext4 workspace              | Mode 2: FUSE SSHFS tunnel
+            v                                                   v
+   [/home/user/code/project]                           [Isolated Docker Container]
+   - 180x-254x faster file I/O                         - Zero host bind mounts
+   - Full Linux toolchain speed                        - Zero Windows host pollution
+                                                       - Resource capped (CPU/RAM/PIDs)
+```
 
-| Environment | Multi-Turn Project Task | Unit Tests Passed? | Git Committed? | Wall-Clock Time | Time Saved |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Windows Host Storage** (`/mnt/c/` / Bind-Mount) | Complete Calculator Suite | ✅ Yes | ✅ Yes | **`659.57s`** (~11.0 min) | Baseline |
-| **Native ext4 / AnyLink Target** (`/home/...`) | Complete Calculator Suite | ✅ Yes | ✅ Yes | **`71.60s`** (~1.2 min) | ⚡ **588.0s FASTER (9.2x / 821% speedup)** |
-
-> [!NOTE]
-> **Why AI agents suffer on Windows host mounts:** Autonomous agents execute a continuous loop of writing modules, compiling bytecode (`__pycache__`), executing test runners, indexing symbols, and staging Git commits. On `/mnt/c/` or Docker host bind-mounts, every turn stalls waiting on 9P cross-OS filesystem synchronization, turning a quick 1-minute prompt into an 11-minute waiting game. With AnyLink, agent loops run at the full speed of Linux in-memory VFS.
+The Windows kernel resolves the junction locally. Every Windows tool (Cursor, VS Code, Antigravity, terminal) treats the folder as a native local directory, while execution runs at native Linux ext4 speeds.
 
 ---
 
-## 📊 Developer Capability Matrix: What Is Possible vs. Not Possible
+## Empirical Performance Benchmarks
 
-How different Windows setups compare when building modern software and running AI coding agents:
+Measured on Windows 11 Home (Build 26200), WSL 2 (Ubuntu 24.04 LTS), and Docker Engine 29.9.2 across 1,500 file operations (writes, reads, stat traversals, and deletions).
 
-| Developer Need / Capability | Option 1: Host Storage (`/mnt/c` or Bind-Mount) | Option 2: Plain WSL 2 (No Linker) | Option 3: Plain Docker (No Linker) | Option 4: AnyLink (WSL Linker & Reverse Sandbox) |
+Full reproducible benchmark script: [`scripts/run_live_performance_proof.py`](file:///D:/code/sandbox-linker/scripts/run_live_performance_proof.py)  
+Raw benchmark data: [`EMPIRICAL_BENCHMARK_DATA.json`](file:///D:/code/sandbox-linker/EMPIRICAL_BENCHMARK_DATA.json)  
+Comprehensive report: [`PERFORMANCE_BENCHMARK_REPORT.md`](file:///D:/code/sandbox-linker/PERFORMANCE_BENCHMARK_REPORT.md)
+
+### 1. File I/O Lifecycle (Setup -> Run -> Destroy)
+
+| Lifecycle Phase | Host 9P Storage (`/mnt/c` or Bind Mount) | Native WSL 2 ext4 (`wsl-linker`) | AnyLink Container ext4 (`sandbox_manager`) | Speedup vs Host |
 | :--- | :---: | :---: | :---: | :---: |
-| **⚡ Blazing Linux Build Speed** (`npm`, `cargo`, `gcc`) | ❌ **106x–182x Slower** (18.7s) | ✅ **Fast** (0.10s) | ✅ **Fast** (0.17s) | ✅ **Blazing Fast (Native ext4)** |
-| **💻 Host IDE Native Open** (Antigravity, Cursor, VS Code) | ✅ Works natively | ⚠️ **Breaks** (UNC authority-stripping bug `C:\Ubuntu`) | ❌ **Impossible** (Files trapped in container volume) | ✅ **Works 100%** (via `DRIVE_FIXED` NTFS junction) |
-| **👀 Reliable File Watchers & Language Servers** | ⚠️ **Unreliable** (Drops events / file locks) | ⚠️ **Fails** on many UNC path normalizers | ❌ **Impossible** | ✅ **Works 100%** (`ReadDirectoryChangesW` intact) |
-| **🛡️ Disposable AI Agent Sandboxing** (Safe from `rm -rf /` or bad scripts) | ❌ **Dangerous** (Can destroy host files) | ❌ **Dangerous** (Can wipe primary WSL distro) | ✅ **Isolated** | ✅ **100% Isolated** (Zero host access, 1-click dissolve) |
-| **🧹 Zero Host Drive Clutter** (No `node_modules` on Windows) | ❌ **Piles up** gigabytes of host clutter | ✅ Clean (In WSL disk) | ✅ Clean (In container layer) | ✅ **Zero Host Pollution** |
-| **📦 Multiple Conflicting Stacks** (e.g. Python 3.8 + 3.13) | ❌ Requires polluting Windows with runtimes | ⚠️ Shared single WSL distro | ✅ Clean container | ✅ **Clean container per project** |
-| **🔄 Survives Reboots & Sleep Cycles** | ✅ Works | ✅ Works | ❌ Mounts drop on Docker restart | ✅ **Self-Healing Daemon** (auto-restores in 20s) |
-| **🗑️ Safe 1-Click Teardown** (Untether link without deleting files) | ❌ Explorer bug can delete targets | ❌ Manual CLI commands | ❌ Manual Docker CLI | ✅ **Safe Remove Button** (`os.rmdir` guarantee) |
+| **Setup Phase** | `0.0028s` | `0.0003s` | `0.0004s` | **7.0x - 9.3x faster** |
+| **File Writes (1,500 files)** | `8.028s` | `0.043s` | `0.069s` | **116x - 186x faster** |
+| **File Reads (1,500 files)** | `5.925s` | `0.018s` | `0.024s` | **246x - 329x faster** |
+| **Directory Stat / Walk** | `2552.1ms` | `4.5ms` | `6.0ms` | **425x - 567x faster** |
+| **Total Run Execution** | **`16.506s`** | **`0.065s`** | **`0.098s`** | **254.6x (WSL) / 168.2x (Container)** |
+| **Destroy Phase** | `2.144s` | `0.024s` | `0.019s` | **88x - 111x faster** |
+| **Residual Host Disk Clutter** | **1,500 files left on host** | **0 files on host** | **0 files on host** | **Zero host pollution** |
+| **Host File Lock Hazards** | High (Explorer locks) | None | None (1-click dissolve) | Safe teardown |
+
+### 2. Autonomous AI Agent Benchmark (`agy` Multi-Turn Project Build)
+
+Multi-turn software build executed autonomously by Google Antigravity CLI (`agy`) scaffolding modules, generating test suites, running pytest, and committing to Git:
+
+| Storage Environment | Multi-Turn Agent Task | Tests Pass | Git Commit | Wall-Clock Time | Time Saved |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Windows Host Storage** (`/mnt/c/`) | Full calculator suite | Yes | Yes | `659.57s` (~11.0 min) | Baseline |
+| **AnyLink ext4 Target** (`/home/...`) | Full calculator suite | Yes | Yes | `71.60s` (~1.2 min) | **588.0s faster (9.2x speedup)** |
 
 ---
 
-## 📖 Overview
+## Pragmatic Q&A
 
-`wsl-linker` (AnyLink) is an open-source Windows application and CLI utility that creates virtual directory symbolic links on your **local Windows host drives** pointing directly into your **WSL 2 Linux ext4 filesystem** or **isolated Docker Dev Containers**.
+### Volumes work?
+**Yes.**  
+Use `-v` or `--volume <name>:/workspace` with `sandbox_manager.py create`. Docker named volumes store project files and build caches (`node_modules`, `.venv`) entirely inside Docker's virtual storage driver. When containers are stopped or recreated, volume data persists intact without writing any files to the Windows host drive. Standard host directory binds (`-v D:\proj:/workspace`) are also supported when host mirroring is required.
 
-It eliminates the classic dilemma of Windows development:
-* **The Problem:** Storing repositories on Windows (`/mnt/c/`) causes Git, Docker, and `npm`/`pnpm` operations to run **over 100x slower** inside Linux. Storing files inside Linux (`/home/...`) means Windows-based IDEs and AI agent harnesses (Antigravity, Cursor, Windsurf, Claude Code, Codex, VS Code) have to open `\\wsl.localhost\...` UNC paths, which many of them mis-parse, block, or can't watch.
-* **The Solution:** `wsl-linker` establishes an in-kernel NTFS directory junction on a local fixed drive (e.g. `D:\code\my-app` ➔ `\\wsl.localhost\Ubuntu-24.04\home\user\code\my-app`). Your code stays 100% on native Linux ext4 for maximum build performance, while every Windows tool sees it as a native local folder without disk duplication or network latency.
+### Space limiting?
+**Yes.**  
+Container storage footprint can be bounded using `--storage-opt size=10G` on supported Docker storage drivers (overlay2 on xfs/btrfs). Furthermore, container files reside inside the WSL virtual disk (`ext4.vhdx`), preventing uncontrolled file growth from fragmenting the Windows host filesystem. Ephemeral workloads can also use `--tmpfs /tmp` or loopback images.
+
+### Performance throttling?
+**Yes.**  
+Resource controls map directly to Docker and Linux cgroups v2:
+* `--cpus 2.0`: Caps CPU core allocation, preventing compile tasks or runaway loops from freezing the Windows host.
+* `-m` / `--memory 2g`: Enforces a hard memory ceiling to protect host RAM.
+* `--pids-limit 200`: Caps maximum process IDs, preventing fork bombs and runaway background processes.
+
+### Is this a breakthrough, or did people already have better solutions?
+**Honest answer: No, this is not a fundamental OS breakthrough.**  
+Virtual filesystems (SSHFS/FUSE), containerization (Docker), and NTFS reparse points have existed for decades. Established tools like VS Code Remote Containers and DevPod already provide containerized environments.
+
+However, existing Windows solutions force an awkward compromise:
+1. *Host bind mounts* (`docker run -v C:\project:/workspace`) cross the Hyper-V / 9P virtualization boundary, resulting in a 100x+ I/O penalty.
+2. *Internal container volumes* keep files trapped inside the container VM, making them inaccessible to local Windows tools, file watchers, and non-VSCode AI agent harnesses.
+3. *Direct WSL UNC paths* (`\\wsl.localhost\...`) trigger path-normalizer bugs in Windows applications and AI harnesses.
+
+AnyLink is pragmatic architectural glue: it connects NTFS junctions, WSL 9P, and reverse SSHFS to deliver native Linux ext4 speed, zero host pollution, and 100% Windows IDE compatibility.
+
+### Why not just open `\\wsl.localhost\...` directly?
+Opening UNC paths directly fails in many Windows applications and AI harnesses:
+* **Path normalization bugs:** URI parsers frequently strip the `wsl.localhost` authority, turning `\\wsl.localhost\Ubuntu\home\...` into `C:\Ubuntu\...`, which fails immediately.
+* **Network drive limitations:** Mapped network drives (`DRIVE_REMOTE`) frequently drop filesystem change events (`ReadDirectoryChangesW`).
+* **The fix:** AnyLink creates a local NTFS junction on a fixed drive (`DRIVE_FIXED`, e.g. `D:\code\app`). The Windows kernel handles reparse resolution internally, ensuring full compatibility with file watchers and local path parsers.
 
 ---
 
-## ✨ Key Features
+## Real-World Use Cases
 
-* ⚡ **100% Native Linux Performance:** Source code stays physically inside WSL's ext4 partition. Full speed for Git, Docker, Rust/Cargo, npm, and compiler toolchains.
-* 🐳 **Isolated Docker Reverse Sandboxes (Zero Host Pollution):** Spin up isolated Docker containers without host bind mounts. Container files are reverse-mounted into WSL via SSHFS and exposed to Windows as local symlinked paths with real-time bidirectional sync and background self-healing.
-* 🧠 **Universal AI Agent Skill:** Out-of-the-box standard Agent Skill (`skills/sandbox-linker/SKILL.md`) and headless CLI (`scripts/sandbox_manager.py`) enabling any agent (Antigravity, Claude Code, Cursor, OpenHands) to programmatically provision, execute in, and dissolve sandboxes.
-* 🤖 **Works With Any Agent Harness / IDE:** The link is a plain local-drive path (`D:\code\my-app`), so there is nothing tool-specific to configure. Verified with Google Antigravity 2.x, Claude Desktop, Cursor, and VS Code.
-* 🛡️ **Drive Safety Check:** Warns you if you try to create a link on a network/mapped drive, which breaks path handling and file watching in many tools.
-* 🖥️ **Modern Fluent Dark GUI:** Ultra-crisp CustomTkinter dashboard with live path preview, auto-wrapping responsive cards, and dynamic WSL distribution detection.
-* 🔄 **Self-Healing Persistence Daemon:** Background engine monitors reverse Docker mounts every 20 seconds, automatically reviving SSH daemons and healing stale mounts after container restarts or sleep cycles.
-* ⌨️ **Scriptable CLI:** Comprehensive command-line interface for automation, terminal workflows, and CI scripting.
-* 📋 **One-Click Copy Path:** Copy the local Windows path of any workspace to paste into any tool's "Open Folder" dialog.
-* 💻 **Instant Context Terminal:** One-click launcher that spawns Windows Terminal logged directly into your Linux workspace directory or container shell.
-* 🛡️ **Zero Data Loss Guarantee:** Safe unlinking via Windows `os.rmdir` untethers the symlink junction itself, leaving your Linux files 100% untouched and safe.
+### Use Case 1: Autonomous AI Coding Agents
+
+```
+[Agent Prompt] 
+      |
+      v
+[sandbox_manager.py create --name agent-task --cpus 2 --memory 2g]
+      |
+      +---> [Isolated Container Provisioned]
+      |     - Native ext4 file system
+      |     - Fast package installs and builds (106x speed)
+      |
+      +---> [Reverse SSHFS Mount in WSL]
+      |
+      +---> [NTFS Junction Created at D:\code\agent-task]
+      |
+      v
+[Agent & Developer Work on D:\code\agent-task]
+      | - Agent writes code directly to D:\code\agent-task
+      | - Host IDE displays syntax highlighting and live diffs
+      | - Agent runs commands: sandbox_manager.py exec agent-task -- npm test
+      |
+      v
+[Task Complete -> Clean Teardown]
+      |
+      v
+[sandbox_manager.py teardown agent-task]
+      - Container stopped, FUSE unmounted, junction removed
+      - Residual files on Windows host: ZERO
+```
+
+### Use Case 2: Native WSL 2 Toolchain Acceleration
+
+```
+[Windows Host IDE] -> Opens D:\code\my-app (Local NTFS Junction)
+       |
+       v  (In-kernel reparse: zero virtualization penalty)
+[WSL 2 Linux ext4] -> Physical path: /home/user/code/my-app
+       |
+       v  (Native Linux in-memory VFS)
+[Toolchains Execute Inside WSL 2]
+       - cargo build / gcc / clang
+       - npm / pnpm / yarn install
+       - git status / commit / diff
+       -> 180x - 254x faster than Windows host /mnt/c/ mounts
+```
+
+### Use Case 3: Safe Untrusted Code Auditing
+
+```
+[Untrusted Repository / PR]
+       |
+       v
+[Provision Disposable Sandbox] -> docker run (isolated network, cgroup limits)
+       |
+       v
+[Clone & Audit Inside Container]
+       - Malicious install scripts cannot access Windows host (C:\, D:\)
+       - Host credentials, SSH keys, and system files remain protected
+       |
+       v
+[Review Code from Windows IDE] -> Read-only inspection via D:\code\audit-repo
+       |
+       v
+[1-Click Dissolve] -> Container dropped, zero lingering artifacts
+```
 
 ---
 
-## ⚙️ Prerequisites
+## Capability Comparison Matrix
 
+| Capability / Feature | Host Mounts (`/mnt/c`) | Plain WSL 2 | Plain Docker | AnyLink (WSL Linker) |
+| :--- | :---: | :---: | :---: | :---: |
+| **Linux Build Speed** (`npm`, `cargo`, `gcc`) | `[FAIL]` (100x+ slower) | `[OK]` (Native ext4) | `[OK]` (Native ext4) | `[OK]` **Native ext4 (106x-254x)** |
+| **Host IDE Compatibility** (Cursor, VS Code) | `[OK]` (Native NTFS) | `[WARN]` (UNC path bugs) | `[FAIL]` (Files trapped in VM) | `[OK]` **Native (`DRIVE_FIXED`)** |
+| **File Watchers & Language Servers** | `[WARN]` (Drops events) | `[WARN]` (UNC normalizer issues) | `[FAIL]` (No host access) | `[OK]` **Full event support** |
+| **Disposable Agent Sandboxing** | `[FAIL]` (Can damage host) | `[FAIL]` (Shared environment) | `[OK]` (Isolated) | `[OK]` **Isolated + resource limits** |
+| **Zero Host Drive Clutter** | `[FAIL]` (Pollutes Windows) | `[OK]` (Inside WSL disk) | `[OK]` (Inside container) | `[OK]` **Zero host pollution** |
+| **Multi-Version Dependency Isolation** | `[FAIL]` (Host conflicts) | `[WARN]` (Single distro) | `[OK]` (Containerized) | `[OK]` **Container per project** |
+| **Survives Reboots & Sleep Cycles** | `[OK]` | `[OK]` | `[FAIL]` (Mounts drop) | `[OK]` **Self-healing daemon (20s)** |
+| **Safe Teardown (Zero Data Loss)** | `[WARN]` (Lock hazards) | `[WARN]` (Manual unlinking) | `[WARN]` (Manual cleanup) | `[OK]` **Guaranteed (`os.rmdir`)** |
+
+---
+
+## Installation & Prerequisites
+
+### Prerequisites
 1. **Windows 10 (Build 19041+) or Windows 11** with **WSL 2** enabled.
 2. **Windows Developer Mode Enabled:**
-   * Go to **Windows Settings** ➔ **System** (or **Update & Security**) ➔ **For Developers**.
-   * Toggle **Developer Mode** to **ON**.
-   * *Why?* Windows requires administrator elevation to create directory symlinks unless Developer Mode is enabled. With Developer Mode on, `wsl-linker` can create links instantly without UAC administrator prompts.
+   * Settings -> System -> For Developers -> Toggle **Developer Mode** to **ON**.
+   * *Reason:* Allows Windows to create directory symbolic links without requiring administrative elevation prompts.
 
----
-
-## 🚀 Quick Start & Installation
-
-### Option 1: Standalone Portable Binary (No Python Required)
-1. Download `WSL Linker.exe` from the latest [Releases](https://github.com/fauzulkc/AnyLink/releases) page.
-2. Double-click to launch the GUI dashboard immediately.
-
-### Option 2: Running via Python
-Clone the repository and install the minimal dependencies:
+### Installation
 
 ```bash
+# Clone the repository
 git clone https://github.com/fauzulkc/AnyLink.git
 cd AnyLink
 
-# Install required dependencies
+# Install GUI dependencies (optional, for desktop dashboards)
 pip install customtkinter
 
-# Launch the desktop GUI
+# Run the standard WSL Linker GUI
 python wsl_linker_gui.py
 
-# Or use the CLI directly
-python wsl_linker.py list
-```
-
-### Option 3: Setting Up a Global CLI Alias
-To use `wsl-linker` from anywhere in PowerShell or CMD, add a wrapper to your `PATH` or add an alias to your PowerShell `$PROFILE`:
-
-```powershell
-# Add to Microsoft.PowerShell_profile.ps1:
-function wsl-linker { python "C:\path\to\wsl-linker\wsl_linker.py" $args }
-```
-
----
-
-## 🖥️ How to Use: Desktop GUI
-
-Launch the GUI by running `WSL Linker.exe` or `python wsl_linker_gui.py`.
-
-```
-+-----------------------------------------------------------------------------------+
-|  WSL LINKER | Zero-Latency Native Workspace Mappings     [✕ Close Form] |
-+-----------------------------------------------------------------------------------+
-| Active Registry Mappings (3)               | Link New Workspace                   |
-|                                            |                                      |
-| [my-web-app]                               | ALIAS NAME                           |
-| D:\code\my-web-app ➔ [Ubuntu] /home/...   | [ my-project                     ]   |
-| [📋 Copy Path] [💻 Open Terminal] [🗑 Remove]| LOCAL PARENT WINDOWS DIRECTORY       |
-|                                            | [ D:\code           ] [ Browse ]     |
-| [backend-api]                              |                                      |
-| D:\code\backend-api ➔ [Ubuntu] /home/...  | WSL TARGET DIRECTORY PATH            |
-| [📋 Copy Path] [💻 Open Terminal] [🗑 Remove]|                                      |
-|                                            | TARGET WSL DISTRIBUTION              |
-|                                            | [ Ubuntu-24.04                 v ]   |
-|                                            |                                      |
-|                                            | Preview: D:\code\my-project          |
-|                                            | [ Create Direct Link 🔗          ]   |
-+-----------------------------------------------------------------------------------+
-```
-
-### 1. Linking a New Workspace
-1. **Alias Name:** Enter the folder name for your project (e.g. `my-project`).
-2. **Local Parent Windows Directory:** Choose an existing folder on a local fixed drive (e.g. `D:\code`). Your virtual link folder will be created inside this directory (`D:\code\my-project`).
-3. **WSL Target Directory Path:** Enter the path inside Linux (e.g. `/home/user/code/my-project`). If the directory does not exist yet, `wsl-linker` will create it inside Linux automatically.
-4. **Distribution:** Select your installed WSL distribution from the dropdown.
-5. Click **"Create Direct Link 🔗"**.
-
-### 2. Copying the Workspace Path
-* Click **"📋 Copy Path"** on any card to copy the local Windows path (e.g. `D:\code\my-project`) and paste it into any IDE or agent harness's "Open Folder" / "Add Workspace" dialog.
-
-### 3. Opening the Workspace in Any Tool
-* Open `D:\code\my-project` (the link) in your tool of choice. Always open the **link path**, never the `\\wsl.localhost\...` path.
-
-### 4. Spawning a Linux Shell
-* Click **"💻 Open Terminal"** on any card. `wsl-linker` launches Windows Terminal (or fallback console) already logged into the exact Linux directory and distribution.
-
-### 5. Safe Unlinking
-* Click **"🗑 Safe Remove"** to delete the Windows symlink. `wsl-linker` safely runs `os.rmdir` on the junction, ensuring **zero file deletions** inside your WSL Linux filesystem.
-
----
-
-## ⌨️ How to Use: Command Line Interface (CLI)
-
-The CLI provides full scriptability for developers who live in the terminal:
-
-### View Active Mappings
-```bash
-wsl-linker list
-```
-Displays all registered mappings, their local Windows path, target WSL distribution, and Linux path.
-
-### Add a New Workspace Mapping
-```bash
-wsl-linker add <windows_path> <wsl_linux_path> [-d <distro>] [-n <alias>]
-```
-* **Example:**
-  ```bash
-  wsl-linker add "D:\code\web-app" "/home/user/code/web-app" --distro Ubuntu-24.04
-  ```
-  Creates the link folder `D:\code\web-app` (must not already exist) pointing to the Linux directory.
-
-### Run Commands in WSL Context from Windows Shell
-Run any Linux command on your project directly from PowerShell or CMD without manual `cd` navigation:
-```bash
-# Run npm test inside the linked WSL folder:
-wsl-linker run npm test
-
-# Run a cargo build:
-wsl-linker run cargo build --release
-```
-
-### Safely Unlink a Workspace
-```bash
-wsl-linker remove web-app
-```
-
----
-
-## 🤖 Why Direct WSL Paths Break Agent Harnesses (and Why the Link Fixes It)
-
-This is **not specific to any one tool** - it is about how a path is understood once it leaves the OS.
-
-| Path you open | What tools see | Result |
-| :--- | :--- | :--- |
-| `\\wsl.localhost\Ubuntu\home\user\app` | UNC network path | Many URI/path normalizers strip the host (`wsl.localhost`) leaving `/Ubuntu/home/...`, which Windows resolves to a non-existent `C:\Ubuntu\...`. Others block UNC for sandboxing or can't watch files. |
-| `X:\app` (SSHFS / WebDAV mapped drive) | `DRIVE_REMOTE` network drive | File watchers and reparse handling are unreliable. |
-| `D:\code\app` -> link into WSL | Normal folder on a local fixed drive (`DRIVE_FIXED`) | Works everywhere. The Windows kernel transparently forwards I/O into WSL ext4. |
-
-Because the link is resolved by Windows itself, **no tool needs special support** - open the link path and it behaves like any local folder.
-
-> 📖 **Deep Dive**: Full investigation, failed experiments (SSHFS/WebDAV mounts), and the Antigravity URI-normalizer analysis are in the [Integration Case Study](docs/ANTIGRAVITY_INTEGRATION_CASE_STUDY.md).
-
----
-
-## 🐳 Isolated Docker Reverse Sandboxes (Experimental Dev Suite)
-
-For tasks requiring fully sandboxed agentic execution, clean reproducible development environments, or zero host file pollution, `wsl-linker` provides **Docker Reverse Sandbox Linking** via `experimental_linker_gui.py` and the standalone `WSL Linker Experimental.exe`.
-
-> [!IMPORTANT]
-> **What makes this a true sandbox:** Your code, compiler toolchains, and package managers execute **100% inside an isolated Linux container**. Zero files are bind-mounted from your Windows host, so rogue scripts or AI agents cannot access your Windows drive ($C:\$, $D:\$, user profile, or credentials). When you finish your task, a single click dissolves the container, leaving zero lingering clutter on Windows.
-
-### 🎯 Who is this for?
-* **Autonomous AI Coding Agents** (Antigravity Agent Mode, Claude Code, Cursor, OpenHands): Give the agent a safe, disposable sandbox to install dependencies, run build commands, and execute tests while you view, syntax-highlight, and review diffs live in your Windows IDE.
-* **Safe Open-Source Repository Auditing**: Clone and test untrusted repositories or review PRs without risking your host machine against malicious `npm postinstall` scripts.
-* **Multi-Version / Conflicting Stacks**: Run Python 3.8 and Python 3.13, or Node 18 and Node 22 simultaneously without installing any runtimes or compilers on your Windows host.
-
-### The Problem with Traditional Dev Containers on Windows
-* **Host Bind Mounts Suffer 100x+ I/O Penalties:** Traditional `docker run -v D:\project:/workspace` maps a Windows NTFS path across the Hyper-V virtualization boundary into Docker. Every file operation crosses the 9P translation layer, causing compilation times to skyrocket, file watchers to drop events, and Windows file locks to prevent directory cleanup.
-* **Host OS Pollution:** Every dependency (`node_modules`, `.venv`, `.cargo`, build caches) is dumped directly onto your Windows host drive.
-* **Volume Isolation Dilemma:** If you keep files entirely inside a Docker volume for native Linux speed, Windows IDEs and AI agent harnesses cannot browse, edit, or watch the files natively.
-
-### The Reverse Docker Link Solution
-`wsl-linker` flips the dev container model inside out:
-1. **Container Runs in Complete Isolation:** A Docker container is launched with **zero host bind mounts**. All source code and dependencies live 100% inside the container's isolated Linux filesystem (`/workspace`).
-2. **Automated SSH Provisioning:** An SSH server (`sshd`) is dynamically configured inside the container, unlocked for root key authentication, with key injection (`devlinker_ed25519` generated inside WSL).
-3. **WSL FUSE Reverse Mount:** WSL mounts the container root using `sshfs` with `idmap=user,allow_other,reconnect` into `~/.devlinker-mounts/<alias>`.
-4. **Windows NTFS Symlink:** Windows creates a directory symlink `D:\code\<alias>` pointing to `\\wsl.localhost\<distro>\home\<user>\.devlinker-mounts\<alias>\workspace` (with automatic fallback to the UNC path if running unprivileged).
-5. **Real-Time Bidirectional Sync:** Windows IDEs, Cursor, and AI agents read and write directly to `D:\code\<alias>`. Changes reflect inside the running container instantaneously without host bind mounts.
-6. **Self-Healing Persistence Daemon:** A background watcher monitors the reverse mount every 20 seconds. If Docker restarts or the system wakes from sleep, it restarts the container, revives `sshd`, and heals stale FUSE mounts automatically.
-
-### Running the Experimental Dashboard
-You can run the experimental suite either via Python or via the compiled standalone binary:
-
-```bash
-# Option A: Standalone executable (zero dependencies)
-dist\WSL Linker Experimental.exe
-
-# Option B: Run via Python
+# Or run the Experimental Reverse Sandbox GUI
 python experimental_linker_gui.py
 ```
-* **WSL Tab:** Link native WSL 2 directories to Windows fixed drives (automatically synchronizes all 13 canonical mappings from `~/.wsl-linker/links.json`).
-* **Docker Tab:** Enter an alias name (e.g. `node-sandbox`), image name (e.g. `node:20-alpine`), and Windows parent directory (`D:\code`). Click **"Create Reverse Docker Sandbox"**.
-* **One-Click Shell:** Click **"💻 Open Shell"** on any Docker card to jump directly into `docker exec -it <container> sh`.
-* **Safe Teardown:** Click **"🗑 Safe Remove"** to safely unmount the FUSE volume, remove the Windows symlink, and dissolve the container without data loss.
+
+Standalone precompiled executables (`WSL Linker.exe` and `WSL Linker Experimental.exe`) are available in the [Releases](https://github.com/fauzulkc/AnyLink/releases) section.
 
 ---
 
-## 🤖 Universal AI Agent Skill (`skills/sandbox-linker`)
+## CLI Reference
 
-`sandbox-linker` ships with an open, standard **Agent Skill** (`skills/sandbox-linker/SKILL.md`) and a headless, zero-GUI CLI runner (`scripts/sandbox_manager.py`).
-
-Any AI agent (Google Antigravity, Claude Code, Cursor, OpenHands, Codex) can programmatically invoke, connect to, execute within, and dissolve isolated sandboxes without human intervention.
-
-```
-       ┌────────────────────────────────────────────────────────┐
-       │             AI Agent Harness / Developer               │
-       │     (Antigravity, Claude Code, Cursor, OpenHands)      │
-       └──────────────────────────┬─────────────────────────────┘
-                                  │
-       1. Provision & Connect     │ 2. Edit Files Directly
-          python sandbox_manager  │    (at returned windows_path)
-          create --json           │
-                                  ▼
-       ┌────────────────────────────────────────────────────────┐
-       │               Windows Host Filesystem                  │
-       │    Local Path: D:\code\<alias> (or direct UNC link)    │
-       └──────────────────────────┬─────────────────────────────┘
-                                  │ Windows 9P / Reparse Point
-                                  ▼
-       ┌────────────────────────────────────────────────────────┐
-       │                   WSL 2 Linux ext4                     │
-       │       FUSE SSHFS Mount: ~/.devlinker-mounts/<alias>    │
-       └──────────────────────────┬─────────────────────────────┘
-                                  │ SSHFS Tunnel (Key Authenticated)
-                                  ▼
-       ┌────────────────────────────────────────────────────────┐
-       │             Isolated Docker Dev Container              │
-       │      Filesystem: /workspace (pure Linux ext4)          │
-       │      ⚡ 9.2x faster agent builds, ZERO host pollution   │
-       └────────────────────────────────────────────────────────┘
-```
-
-### Agent Skill CLI Commands (`scripts/sandbox_manager.py`)
-
-All commands support `--json` for direct parsing by agent toolchains:
+### 1. Standard WSL Linker CLI (`wsl_linker.py`)
 
 ```bash
-# 1. Provision a sandbox (e.g. Node 20, Python 3.11, Alpine, Debian)
-python scripts/sandbox_manager.py create --name agent-task-1 --image node:20-alpine --json
+# List all active mappings
+python wsl_linker.py list
 
-# 2. Execute commands inside the sandbox container at native speed
-python scripts/sandbox_manager.py exec agent-task-1 -- npm install
-python scripts/sandbox_manager.py exec agent-task-1 -- npm test
+# Add a link: Windows path -> Linux WSL path
+python wsl_linker.py add "D:\code\web-app" "/home/user/code/web-app" --distro Ubuntu-24.04
 
-# 3. List all active sandboxes and WSL links
-python scripts/sandbox_manager.py list --json
+# Run a Linux command directly inside the linked directory
+python wsl_linker.py run npm test
+python wsl_linker.py run cargo build --release
 
-# 4. Inspect container health and mount status
-python scripts/sandbox_manager.py status agent-task-1 --json
-
-# 5. Automatically heal stale mounts or restart stopped containers
-python scripts/sandbox_manager.py heal agent-task-1
-
-# 6. Cleanly dissolve sandbox (unmounts FUSE, deletes symlink, stops container)
-python scripts/sandbox_manager.py teardown agent-task-1 --json
+# Safely remove a link (does not delete Linux files)
+python wsl_linker.py remove web-app
 ```
 
-### Programmatic JSON Output Format
+### 2. Headless Sandbox Manager CLI (`scripts/sandbox_manager.py`)
 
-When an agent calls `create --json`, `sandbox_manager.py` responds with:
+Designed for AI agent harnesses and automated scripts. Supports `--json` on all commands.
+
+```bash
+# Provision an isolated container sandbox mapped to Windows
+python scripts/sandbox_manager.py create --name agent-task --image node:20-alpine --cpus 2.0 --memory 2g --json
+
+# Execute commands inside container workspace at native ext4 speed
+python scripts/sandbox_manager.py exec agent-task -- npm install
+python scripts/sandbox_manager.py exec agent-task -- npm test
+
+# List active sandboxes and WSL links
+python scripts/sandbox_manager.py list --json
+
+# Inspect sandbox health, container state, and mount status
+python scripts/sandbox_manager.py status agent-task --json
+
+# Auto-reconnect stale mounts or restart stopped containers
+python scripts/sandbox_manager.py heal agent-task
+
+# Dissolve sandbox (unmounts FUSE, removes junction, stops container)
+python scripts/sandbox_manager.py teardown agent-task --json
+```
+
+#### Available Flags for `sandbox_manager.py create`
+
+| Flag | Description | Example |
+| :--- | :--- | :--- |
+| `-n`, `--name` | Unique alias name for the sandbox (required) | `--name test-env` |
+| `-i`, `--image` | Docker base image (default: `alpine:latest`) | `--image python:3.11-slim` |
+| `-p`, `--parent` | Windows parent folder for symlink (default: current dir) | `--parent D:\code` |
+| `-d`, `--distro` | WSL 2 distro for SSHFS bridge (default: autodetected) | `--distro Ubuntu-24.04` |
+| `--cpus` | CPU core allocation limit | `--cpus 1.5` |
+| `-m`, `--memory` | Memory ceiling limit | `--memory 2g` |
+| `--pids-limit` | Maximum process limit (prevents fork bombs) | `--pids-limit 200` |
+| `-v`, `--volume` | Docker volume mount (named or host bind) | `-v my_cache:/workspace/.cache` |
+| `--storage-opt` | Storage driver option (disk size cap) | `--storage-opt size=10G` |
+| `--json` | Output machine-readable JSON | `--json` |
+
+#### Machine-Readable JSON Output
+
+When called with `--json`, `create` outputs structured connection details for immediate agent consumption:
 
 ```json
 {
   "status": "success",
-  "name": "agent-task-1",
-  "container_name": "devlink_container_agent-task-1",
+  "name": "agent-task",
+  "container_name": "devlink_container_agent-task",
   "image": "node:20-alpine",
   "ssh_port": 2222,
-  "windows_path": "\\\\wsl.localhost\\Ubuntu-24.04\\home\\fauzul\\.devlinker-mounts\\agent-task-1\\workspace",
-  "wsl_unc_path": "\\\\wsl.localhost\\Ubuntu-24.04\\home\\fauzul\\.devlinker-mounts\\agent-task-1\\workspace",
+  "windows_path": "\\\\wsl.localhost\\Ubuntu-24.04\\home\\user\\.devlinker-mounts\\agent-task\\workspace",
+  "wsl_unc_path": "\\\\wsl.localhost\\Ubuntu-24.04\\home\\user\\.devlinker-mounts\\agent-task\\workspace",
   "wsl_distro": "Ubuntu-24.04",
-  "wsl_mount_path": "/home/fauzul/.devlinker-mounts/agent-task-1",
+  "wsl_mount_path": "/home/user/.devlinker-mounts/agent-task",
   "symlink_created": false,
   "link_type": "reverse"
 }
 ```
 
-The agent immediately uses `windows_path` to read/write source files, and uses `sandbox_manager.py exec agent-task-1 -- <cmd>` to run test suites or compile binaries inside the container.
+---
+
+## Security, Safety, and Compliance
+
+* **Localhost-Only Network Binding:** Container SSH ports bind strictly to `127.0.0.1` (never `0.0.0.0`), preventing external network access to the sandbox bridge.
+* **Safe Unlink Guarantee:** Symlink removal strictly uses `os.rmdir()` on verified directory junctions. It never recurses into directories and cannot delete files inside WSL or container filesystems.
+* **Drive Type Validation:** Queries Windows `GetDriveTypeW` to prevent creating links on remote network drives (`DRIVE_REMOTE`), avoiding silent path failures.
+* **Atomic Registry Writes:** Registry configurations are written via atomic temporary file swaps with automatic backup creation (`.corrupt.bak`) on parse failures.
+* **Telemetry Free:** Runs 100% locally on your machine. Zero telemetry, zero external network calls.
 
 ---
 
-## 🏗️ Architecture
+## License
 
-### Mode 1: WSL 2 Direct Native Workspace Link
-```
-+--------------------------------------------------------------------+
-|                        WINDOWS HOST (C: / D:)                      |
-|                                                                    |
-|  +--------------------+     +-----------------------------------+  |
-|  | AI Agent Harness   |     | Windows File Explorer / Editors   |  |
-|  | (any IDE / agent)  |     | (VS Code, Sublime Text, PyCharm)  |  |
-|  +---------+----------+     +-----------------+-----------------+  |
-|            |                                  |                    |
-|            | Opens D:\code\project            |                    |
-|            v                                  v                    |
-|  +--------------------------------------------------------------+  |
-|  |           Local NTFS Directory Junction (Symlink)            |  |
-|  |           Path: D:\code\project (DRIVE_FIXED)                |  |
-|  +------------------------------+-------------------------------+  |
-+---------------------------------|----------------------------------+
-                                  | In-Kernel NTFS Reparse Point
-                                  | \\wsl.localhost\Ubuntu-24.04\...
-                                  v
-+--------------------------------------------------------------------+
-|                         WSL 2 LINUX VM                             |
-|                                                                    |
-|  +--------------------------------------------------------------+  |
-|  |               Native ext4 Linux Filesystem                   |  |
-|  |               Path: /home/user/code/project                  |  |
-|  +--------------------------------------------------------------+  |
-|  |                                                              |  |
-|  |   ⚡ Native Build Speed (npm, cargo, git, docker, compilers) |  |
-|  +--------------------------------------------------------------+  |
-+--------------------------------------------------------------------+
-```
-
-### Mode 2: Isolated Docker Reverse Sandbox Bridge
-```
-+--------------------------------------------------------------------+
-|                        WINDOWS HOST (C: / D:)                      |
-|                                                                    |
-|  +--------------------+     +-----------------------------------+  |
-|  | AI Agent Harness   |     | Windows File Explorer / Editors   |  |
-|  | (any IDE / agent)  |     | (VS Code, Cursor, Antigravity)    |  |
-|  +---------+----------+     +-----------------+-----------------+  |
-|            |                                  |                    |
-|            | Opens D:\code\sandbox            |                    |
-|            v                                  v                    |
-|  +--------------------------------------------------------------+  |
-|  |           Local NTFS Directory Junction (Symlink)            |  |
-|  |           Path: D:\code\sandbox (DRIVE_FIXED)                |  |
-|  +------------------------------+-------------------------------+  |
-+---------------------------------|----------------------------------+
-                                  | In-Kernel NTFS Reparse Point
-                                  | \\wsl.localhost\Ubuntu-24.04\home\user\.devlinker-mounts\sandbox\workspace
-                                  v
-+--------------------------------------------------------------------+
-|                         WSL 2 LINUX VM                             |
-|                                                                    |
-|  +--------------------------------------------------------------+  |
-|  |  FUSE SSHFS Mount Point: ~/.devlinker-mounts/sandbox         |  |
-|  |  Options: idmap=user, allow_other, reconnect, port=2222     |  |
-|  |  Managed by: 🔄 Self-Healing Persistence Daemon (every 20s)   |  |
-|  +------------------------------+-------------------------------+  |
-+---------------------------------|----------------------------------+
-                                  | SSHFS Tunnel (SSH Key Authenticated)
-                                  | localhost:2222 -> Container :22
-                                  v
-+--------------------------------------------------------------------+
-|                  ISOLATED DOCKER DEV CONTAINER                     |
-|                                                                    |
-|  +--------------------------------------------------------------+  |
-|  |  Container Filesystem (e.g. alpine, node, python, debian)    |  |
-|  |  Workspace Path: /workspace (chmod 777)                      |  |
-|  |  Daemon: openssh-server (sshd on port 22)                    |  |
-|  |                                                              |  |
-|  |  🐳 100% Isolated: Zero Host Bind Mounts, Zero Host Pollution|  |
-|  +--------------------------------------------------------------+  |
-+--------------------------------------------------------------------+
-```
-
----
-
-## 🛠️ Developer & Build Guide
-
-The repository includes a developer `Makefile` for building and testing:
-
-| Command | Action |
-| :--- | :--- |
-| `make run` | Runs the GUI locally in Python (`python wsl_linker_gui.py`) |
-| `make build-local` | Compiles the standalone executable `dist/WSL Linker.exe` using local PyInstaller |
-| `make build-docker` | Compiles the standalone EXE inside an isolated Wine Docker container |
-| `make clean` | Cleans PyInstaller caches, build specs, and output folders |
-| `make status` | Checks Git status |
-
-### Building the Executable Manually:
-```bash
-pip install customtkinter pyinstaller
-pyinstaller --onefile --noconsole --collect-all customtkinter --name "WSL Linker" wsl_linker_gui.py
-```
-The compiled binary will be placed in `dist/WSL Linker.exe`.
-
----
-
-## 🔒 Security & Data Safety
-
-* **Safe Unlink Guarantee:** When unlinking workspaces, `wsl-linker` strictly uses `os.rmdir()` on the local junction. It verifies that the path is an NTFS symbolic link before unlinking. It **never recurses** into the directory, ensuring your Linux files inside WSL are 100% protected.
-* **Drive Validation:** `wsl-linker` queries `GetDriveTypeW` to prevent creating symlinks on network-mapped drives, saving you from path resolution bugs and broken file watchers.
-* **Zero Telemetry:** `wsl-linker` runs 100% locally on your machine. No telemetry, no remote servers, no analytics.
-
----
-
-## 📜 License
-
-This project is licensed under the **MIT License** — feel free to use, modify, distribute, and package it for your personal workflows or team infrastructure.
-
-Contributions, issues, and feature requests are welcome! 🚀
+This project is licensed under the [MIT License](LICENSE).
