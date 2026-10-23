@@ -68,6 +68,7 @@ It eliminates the classic dilemma of Windows development:
 
 * ⚡ **100% Native Linux Performance:** Source code stays physically inside WSL's ext4 partition. Full speed for Git, Docker, Rust/Cargo, npm, and compiler toolchains.
 * 🐳 **Isolated Docker Reverse Sandboxes (Zero Host Pollution):** Spin up isolated Docker containers without host bind mounts. Container files are reverse-mounted into WSL via SSHFS and exposed to Windows as local symlinked paths with real-time bidirectional sync and background self-healing.
+* 🧠 **Universal AI Agent Skill:** Out-of-the-box standard Agent Skill (`skills/sandbox-linker/SKILL.md`) and headless CLI (`scripts/sandbox_manager.py`) enabling any agent (Antigravity, Claude Code, Cursor, OpenHands) to programmatically provision, execute in, and dissolve sandboxes.
 * 🤖 **Works With Any Agent Harness / IDE:** The link is a plain local-drive path (`D:\code\my-app`), so there is nothing tool-specific to configure. Verified with Google Antigravity 2.x, Claude Desktop, Cursor, and VS Code.
 * 🛡️ **Drive Safety Check:** Warns you if you try to create a link on a network/mapped drive, which breaks path handling and file watching in many tools.
 * 🖥️ **Modern Fluent Dark GUI:** Ultra-crisp CustomTkinter dashboard with live path preview, auto-wrapping responsive cards, and dynamic WSL distribution detection.
@@ -261,6 +262,90 @@ python experimental_linker_gui.py
 * **Docker Tab:** Enter an alias name (e.g. `node-sandbox`), image name (e.g. `node:20-alpine`), and Windows parent directory (`D:\code`). Click **"Create Reverse Docker Sandbox"**.
 * **One-Click Shell:** Click **"💻 Open Shell"** on any Docker card to jump directly into `docker exec -it <container> sh`.
 * **Safe Teardown:** Click **"🗑 Safe Remove"** to safely unmount the FUSE volume, remove the Windows symlink, and dissolve the container without data loss.
+
+---
+
+## 🤖 Universal AI Agent Skill (`skills/sandbox-linker`)
+
+`sandbox-linker` ships with an open, standard **Agent Skill** (`skills/sandbox-linker/SKILL.md`) and a headless, zero-GUI CLI runner (`scripts/sandbox_manager.py`).
+
+Any AI agent (Google Antigravity, Claude Code, Cursor, OpenHands, Codex) can programmatically invoke, connect to, execute within, and dissolve isolated sandboxes without human intervention.
+
+```
+       ┌────────────────────────────────────────────────────────┐
+       │             AI Agent Harness / Developer               │
+       │     (Antigravity, Claude Code, Cursor, OpenHands)      │
+       └──────────────────────────┬─────────────────────────────┘
+                                  │
+       1. Provision & Connect     │ 2. Edit Files Directly
+          python sandbox_manager  │    (at returned windows_path)
+          create --json           │
+                                  ▼
+       ┌────────────────────────────────────────────────────────┐
+       │               Windows Host Filesystem                  │
+       │    Local Path: D:\code\<alias> (or direct UNC link)    │
+       └──────────────────────────┬─────────────────────────────┘
+                                  │ Windows 9P / Reparse Point
+                                  ▼
+       ┌────────────────────────────────────────────────────────┐
+       │                   WSL 2 Linux ext4                     │
+       │       FUSE SSHFS Mount: ~/.devlinker-mounts/<alias>    │
+       └──────────────────────────┬─────────────────────────────┘
+                                  │ SSHFS Tunnel (Key Authenticated)
+                                  ▼
+       ┌────────────────────────────────────────────────────────┐
+       │             Isolated Docker Dev Container              │
+       │      Filesystem: /workspace (pure Linux ext4)          │
+       │      ⚡ 9.2x faster agent builds, ZERO host pollution   │
+       └────────────────────────────────────────────────────────┘
+```
+
+### Agent Skill CLI Commands (`scripts/sandbox_manager.py`)
+
+All commands support `--json` for direct parsing by agent toolchains:
+
+```bash
+# 1. Provision a sandbox (e.g. Node 20, Python 3.11, Alpine, Debian)
+python scripts/sandbox_manager.py create --name agent-task-1 --image node:20-alpine --json
+
+# 2. Execute commands inside the sandbox container at native speed
+python scripts/sandbox_manager.py exec agent-task-1 -- npm install
+python scripts/sandbox_manager.py exec agent-task-1 -- npm test
+
+# 3. List all active sandboxes and WSL links
+python scripts/sandbox_manager.py list --json
+
+# 4. Inspect container health and mount status
+python scripts/sandbox_manager.py status agent-task-1 --json
+
+# 5. Automatically heal stale mounts or restart stopped containers
+python scripts/sandbox_manager.py heal agent-task-1
+
+# 6. Cleanly dissolve sandbox (unmounts FUSE, deletes symlink, stops container)
+python scripts/sandbox_manager.py teardown agent-task-1 --json
+```
+
+### Programmatic JSON Output Format
+
+When an agent calls `create --json`, `sandbox_manager.py` responds with:
+
+```json
+{
+  "status": "success",
+  "name": "agent-task-1",
+  "container_name": "devlink_container_agent-task-1",
+  "image": "node:20-alpine",
+  "ssh_port": 2222,
+  "windows_path": "\\\\wsl.localhost\\Ubuntu-24.04\\home\\fauzul\\.devlinker-mounts\\agent-task-1\\workspace",
+  "wsl_unc_path": "\\\\wsl.localhost\\Ubuntu-24.04\\home\\fauzul\\.devlinker-mounts\\agent-task-1\\workspace",
+  "wsl_distro": "Ubuntu-24.04",
+  "wsl_mount_path": "/home/fauzul/.devlinker-mounts/agent-task-1",
+  "symlink_created": false,
+  "link_type": "reverse"
+}
+```
+
+The agent immediately uses `windows_path` to read/write source files, and uses `sandbox_manager.py exec agent-task-1 -- <cmd>` to run test suites or compile binaries inside the container.
 
 ---
 

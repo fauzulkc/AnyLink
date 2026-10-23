@@ -38,6 +38,14 @@ This todo list outlines the next steps to implement the self-healing reverse Doc
     - [x] Verify bidirectional editing is lag-free and correct.
     - [x] Simulate Windows reboot (restart container) and verify self-healing remounts.
 
+- [x] **Phase 7: Universal AI Agent Skill & Headless CLI**
+    - [x] Implement headless CLI `scripts/sandbox_manager.py` (zero GUI dependencies, stdlib only).
+    - [x] Support `create`, `exec`, `list`, `status`, `heal`, `teardown`, `wsl-link`, and `wsl-unlink`.
+    - [x] Add machine-readable `--json` output format for agent parsing.
+    - [x] Author universal AI Agent Skill specification in `skills/sandbox-linker/SKILL.md`.
+    - [x] Install skill into global agent repository (`C:\Users\fauzu\.gemini\config\skills\sandbox-linker\`).
+    - [x] End-to-end verified with live multi-turn agent execution inside Docker container.
+
 ---
 
 ## 🔬 Technical Deep Dive: How the Reverse Docker Sandbox Pipeline Works
