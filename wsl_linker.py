@@ -5,6 +5,8 @@ import json
 import argparse
 import subprocess
 import datetime
+import tempfile
+import shutil
 from pathlib import Path
 
 # Safe encoding for Windows consoles
@@ -29,30 +31,55 @@ BOLD = "\033[1m"
 
 def get_registry_path():
     """Get the path to the central JSON link registry in user home."""
-    home = Path.home()
-    registry_dir = home / ".wsl-linker"
+    env_dir = os.environ.get("WSL_LINKER_CONFIG_DIR")
+    registry_dir = Path(env_dir) if env_dir else Path.home() / ".wsl-linker"
     registry_dir.mkdir(parents=True, exist_ok=True)
     return registry_dir / "links.json"
 
 def load_registry():
-    """Load registry mappings."""
+    """Load registry mappings with corruption backup."""
     path = get_registry_path()
     if not path.exists():
         return {"mappings": []}
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"mappings": []}
+            data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError(f"Root JSON entity in '{path}' must be an object")
+            if "mappings" not in data:
+                data["mappings"] = []
+            return data
+    except Exception as e:
+        bak_path = path.with_name(path.name + ".corrupt.bak")
+        try:
+            shutil.copy2(path, bak_path)
+        except Exception:
+            pass
+        raise RuntimeError(f"Corrupt registry at '{path}': {e}. Backup created at '{bak_path}'") from e
 
 def save_registry(data):
-    """Save registry mappings."""
+    """Save registry mappings atomically."""
     path = get_registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    dir_path = path.parent
+    temp_file = None
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, encoding="utf-8") as f:
+            temp_file = f.name
             json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_file, path)
+        temp_file = None
     except Exception as e:
-        print(f"{RED}Error saving registry: {e}{RESET}")
+        sys.stderr.write(f"{RED}Error saving registry: {e}{RESET}\n")
+        raise
+    finally:
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
 
 def is_admin_windows():
     """Check if the script is running with Windows Administrator privileges."""
@@ -81,23 +108,25 @@ def check_windows_drive_type(win_path):
 def add_link(args):
     """Create a new symbolic link and save it to the registry."""
     win_path = os.path.abspath(args.windows_path)
-    wsl_path = args.wsl_path.replace('\\', '/')
     distro = args.distro or "Ubuntu-24.04"
     name = args.name or os.path.basename(win_path.rstrip("\\/"))
 
     if not name:
-        print(f"{RED}Error: Could not derive a valid name. Please provide one with --name.{RESET}")
-        return
+        sys.stderr.write(f"{RED}Error: Could not derive a valid name. Please provide one with --name.{RESET}\n")
+        sys.exit(1)
+
+    # Normalize WSL target path to always ensure leading slash
+    wsl_path = "/" + args.wsl_path.strip().replace('\\', '/').lstrip('/')
 
     # Check if this name or local path already exists in registry
     registry = load_registry()
     for mapping in registry["mappings"]:
         if mapping["name"].lower() == name.lower():
-            print(f"{RED}Error: A mapping named '{name}' already exists.{RESET}")
-            return
+            sys.stderr.write(f"{RED}Error: A mapping named '{name}' already exists.{RESET}\n")
+            sys.exit(1)
         if os.path.abspath(mapping["windows_path"]).lower() == win_path.lower():
-            print(f"{RED}Error: Local path '{win_path}' is already linked to '{mapping['wsl_path']}'.{RESET}")
-            return
+            sys.stderr.write(f"{RED}Error: Local path '{win_path}' is already linked to '{mapping['wsl_path']}'.{RESET}\n")
+            sys.exit(1)
 
     # Check drive type on Windows
     is_fixed, drive_desc = check_windows_drive_type(win_path)
@@ -107,7 +136,7 @@ def add_link(args):
         print(f"{YELLOW}and file watchers/path validation often fail on them (IDEs, agent harnesses, etc.).{RESET}")
         print(f"{YELLOW}For best compatibility, use a local fixed drive (such as D:\\ or C:\\).{RESET}")
 
-    # Target path in Windows for symbolic link creation
+    # Target path in Windows for symbolic link creation (guaranteed leading slash)
     target_win_unc = f"\\\\wsl.localhost\\{distro}" + wsl_path.replace('/', '\\')
 
     # Verify if WSL distro actually exists
@@ -116,20 +145,19 @@ def add_link(args):
         if distro_check.returncode != 0:
             print(f"{YELLOW}Warning: WSL distro '{distro}' was not detected or is not running.{RESET}")
     except Exception:
-         print(f"{YELLOW}Warning: Could not verify WSL installation.{RESET}")
+        print(f"{YELLOW}Warning: Could not verify WSL installation.{RESET}")
 
     # Ensure remote directory exists inside WSL
     try:
         subprocess.run(["wsl", "-d", distro, "-e", "mkdir", "-p", wsl_path], check=True)
     except Exception as e:
-        print(f"{RED}Error: Failed to ensure WSL directory '{wsl_path}' exists: {e}{RESET}")
-        return
+        sys.stderr.write(f"{RED}Error: Failed to ensure WSL directory '{wsl_path}' exists: {e}{RESET}\n")
+        sys.exit(1)
 
     # Verify if Windows destination directory already exists
     if os.path.exists(win_path):
-        print(f"{RED}Error: The Windows destination '{win_path}' already exists.{RESET}")
-        print(f"{YELLOW}Hint: To create a symlink, the target folder path must not already exist as a normal directory.{RESET}")
-        return
+        sys.stderr.write(f"{RED}Error: The Windows destination '{win_path}' already exists.{RESET}\n{YELLOW}Hint: To create a symlink, the target folder path must not already exist as a normal directory.{RESET}\n")
+        sys.exit(1)
 
     print(f"{CYAN}Creating link: {BOLD}{win_path}{RESET} {CYAN}--->{RESET} {BOLD}{target_win_unc}{RESET}")
 
@@ -141,14 +169,11 @@ def add_link(args):
             os.symlink(wsl_path, win_path)
         print(f"{GREEN}✔ Directory symbolic link created successfully!{RESET}")
     except PermissionError:
-        print(f"{RED}Permission Error: Symbolic link creation requires elevation on Windows.{RESET}")
-        print(f"{YELLOW}Solutions:{RESET}")
-        print(f" 1. Run your terminal/command prompt as {BOLD}Administrator{RESET}.")
-        print(f" 2. Enable {BOLD}Developer Mode{RESET} in Windows Settings (Settings > Update & Security > For Developers).")
-        return
+        sys.stderr.write(f"{RED}Permission Error: Symbolic link creation requires elevation on Windows.{RESET}\n{YELLOW}Solutions:{RESET}\n 1. Run your terminal/command prompt as {BOLD}Administrator{RESET}.\n 2. Enable {BOLD}Developer Mode{RESET} in Windows Settings (Settings > Update & Security > For Developers).\n")
+        sys.exit(1)
     except Exception as e:
-        print(f"{RED}Failed to create symbolic link: {e}{RESET}")
-        return
+        sys.stderr.write(f"{RED}Failed to create symbolic link: {e}{RESET}\n")
+        sys.exit(1)
 
     # Save to JSON registry
     new_mapping = {
@@ -179,17 +204,16 @@ def remove_link(args):
             win_path = os.path.abspath(target)
             print(f"{YELLOW}Warning: Path is a symbolic link but not found in the registry. Attempting direct removal...{RESET}")
         else:
-            print(f"{RED}Error: No link named '{target}' found in mappings registry.{RESET}")
-            return
+            sys.stderr.write(f"{RED}Error: No link named '{target}' found in mappings registry.{RESET}\n")
+            sys.exit(1)
     else:
         win_path = match["windows_path"]
 
-    # Safely remove symbolic link
+    # Safely remove symbolic link (NEVER delete normal directory)
     if os.path.exists(win_path) or os.path.islink(win_path):
         if not os.path.islink(win_path):
-            print(f"{RED}Safety Error: '{win_path}' is a normal directory, not a symbolic link!{RESET}")
-            print(f"{YELLOW}Aborting to prevent accidental data deletion.{RESET}")
-            return
+            sys.stderr.write(f"{RED}Safety Error: '{win_path}' is a normal directory, not a symbolic link!{RESET}\n{YELLOW}Aborting to prevent accidental data deletion.{RESET}\n")
+            sys.exit(1)
 
         try:
             print(f"{CYAN}Safely removing Windows symbolic link: {BOLD}{win_path}{RESET}")
@@ -199,8 +223,8 @@ def remove_link(args):
                 os.unlink(win_path)
             print(f"{GREEN}✔ Symbolic link removed successfully. (WSL target files remain fully preserved!){RESET}")
         except Exception as e:
-            print(f"{RED}Failed to remove link file: {e}{RESET}")
-            return
+            sys.stderr.write(f"{RED}Failed to remove link file: {e}{RESET}\n")
+            sys.exit(1)
     else:
         print(f"{YELLOW}Warning: Physical symbolic link folder at '{win_path}' was already deleted.{RESET}")
 
@@ -241,29 +265,30 @@ def run_command(args):
             break
 
     if not match:
-        print(f"{RED}Error: Current directory is not inside any registered wsl-linker workspace.{RESET}")
-        print("Please navigate to a linked workspace or register one using 'wsl-linker add'.")
-        return
+        sys.stderr.write(f"{RED}Error: Current directory is not inside any registered wsl-linker workspace.{RESET}\n{YELLOW}Please navigate to a linked workspace or register one using 'wsl-linker add'.{RESET}\n")
+        sys.exit(1)
 
     win_root = os.path.abspath(match["windows_path"])
-    relative = current_dir[len(win_root):].replace('\\', '/')
-    guest_target_dir = (match["wsl_path"] + relative).replace('//', '/')
+    rel = os.path.relpath(current_dir, win_root)
+    if rel == ".":
+        guest_target_dir = match["wsl_path"]
+    else:
+        guest_target_dir = (match["wsl_path"].rstrip('/') + "/" + rel.replace('\\', '/')).replace('//', '/')
 
     command = " ".join(args.cmd_args)
     if not command:
-        print(f"{RED}Error: Please specify a command to execute inside WSL.{RESET}")
-        print("Example: wsl-linker run npm install")
-        return
+        sys.stderr.write(f"{RED}Error: Please specify a command to execute inside WSL.{RESET}\n{YELLOW}Example: wsl-linker run npm install{RESET}\n")
+        sys.exit(1)
 
     print(f"{CYAN}[wsl-linker] Executing inside {match['wsl_distro']} ({guest_target_dir}):{RESET}")
     print(f"{BOLD}> {command}{RESET}\n")
 
     try:
-        wsl_exec = ["wsl", "-d", match["wsl_distro"], "-e", "bash", "-c", f"cd '{guest_target_dir}' && {command}"]
+        wsl_exec = ["wsl", "-d", match["wsl_distro"], "--cd", guest_target_dir, "-e", "bash", "-c", command]
         result = subprocess.run(wsl_exec)
         sys.exit(result.returncode)
     except Exception as e:
-        print(f"{RED}Failed to execute command in WSL: {e}{RESET}")
+        sys.stderr.write(f"{RED}Failed to execute command in WSL: {e}{RESET}\n")
         sys.exit(1)
 
 def main():

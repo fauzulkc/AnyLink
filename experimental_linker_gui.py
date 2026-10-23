@@ -10,6 +10,7 @@ secure Remote SSH Cloud node mounts in a unified visual environment.
 import os
 import sys
 import json
+import shlex
 import subprocess
 import datetime
 from pathlib import Path
@@ -41,7 +42,8 @@ COLOR_DANGER_HOVER = "#441f26"  # Subtle dark crimson hover
 
 # Configuration Paths
 def get_experimental_dir():
-    path = Path.home() / ".wsl-linker-experimental"
+    env_dir = os.environ.get("WSL_LINKER_EXPERIMENTAL_DIR")
+    path = Path(env_dir) if env_dir else Path.home() / ".wsl-linker-experimental"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -435,13 +437,13 @@ CMD ["tail", "-f", "/dev/null"]
             cmd = [
                 "docker", "run", "-d",
                 "--name", "devlinker-bridge",
-                "--privileged",
-                "-v", "/var/run/docker.sock:/var/run/docker.sock",
+                "--cap-add=SYS_ADMIN",
+                "--device", "/dev/fuse",
                 "-v", f"{host_dir}:/projects:shared",
                 "devlinker-bridge"
             ]
             subprocess.run(cmd, check=True, capture_output=True)
-            self.log("Docker Sidecar Bridge successfully launched and attached to docker.sock!", is_success=True)
+            self.log("Docker Sidecar Bridge successfully launched with FUSE capabilities!", is_success=True)
             return True
         except Exception as e:
             self.log(f"Failed to bootstrap Docker Sidecar Bridge: {e}", is_error=True)
@@ -460,14 +462,21 @@ CMD ["tail", "-f", "/dev/null"]
         )
 
     def _find_free_port(self, db):
-        """Finds a free host TCP port starting at 2222, skipping ports already registered."""
-        used = {m.get("ssh_port") for m in db.get("docker_mappings", []) if m.get("ssh_port")}
+        """Finds a free host TCP port starting at 2222 on localhost, skipping ports already registered."""
+        used = set()
+        for m in db.get("docker_mappings", []):
+            p = m.get("ssh_port")
+            if p is not None:
+                try:
+                    used.add(int(p))
+                except (ValueError, TypeError):
+                    pass
         for port in range(2222, 2322):
             if port in used:
                 continue
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
-                    s.bind(("0.0.0.0", port))
+                    s.bind(("127.0.0.1", port))
                 except OSError:
                     continue
             return port
@@ -559,10 +568,12 @@ grep -q '^Subsystem.*sftp' /etc/ssh/sshd_config || echo 'Subsystem sftp internal
         key = f"$HOME/.ssh/{self.SSH_KEY_NAME}"
         opts = (
             f"IdentityFile={key},port={port},StrictHostKeyChecking=no,UserKnownHostsFile=/dev/null,"
-            "reconnect,ServerAliveInterval=10,ServerAliveCountMax=3,idmap=user,allow_other,BatchMode=yes"
+            "reconnect,ServerAliveInterval=10,ServerAliveCountMax=3,idmap=user,allow_other,BatchMode=yes,"
+            "kernel_cache,auto_cache,entry_timeout=60,attr_timeout=60,big_writes,max_read=131072,max_write=131072,compression=no"
         )
+        q_mount = shlex.quote(mount_path)
         return (
-            f'M="{mount_path}"; mkdir -p "$M"; '
+            f'M={q_mount}; mkdir -p "$M"; '
             f'(fusermount3 -uz "$M" || fusermount -uz "$M") >/dev/null 2>&1; '
             f'sshfs -o {opts} root@127.0.0.1:/ "$M"'
         )
@@ -704,7 +715,7 @@ grep -q '^Subsystem.*sftp' /etc/ssh/sshd_config || echo 'Subsystem sftp internal
                 "docker", "run", "-d",
                 "--name", container_name,
                 "--restart", "unless-stopped",
-                "-p", f"{port}:22",
+                "-p", f"127.0.0.1:{port}:22",
                 "-w", "/workspace",
             ]
 
@@ -812,7 +823,12 @@ grep -q '^Subsystem.*sftp' /etc/ssh/sshd_config || echo 'Subsystem sftp internal
             subprocess.run(["docker", "exec", "devlinker-bridge", "chmod", "600", f"/root/.ssh/{key_name}"], check=True)
 
             # Mount remote node inside bridge container
-            mount_cmd = f"sshfs {user}@{host}:{target} /projects/remote_{alias} -o allow_other,default_permissions,cache=yes -o IdentityFile=/root/.ssh/{key_name}"
+            q_user = shlex.quote(user)
+            q_host = shlex.quote(host)
+            q_target = shlex.quote(target)
+            q_dest = shlex.quote(f"/projects/remote_{alias}")
+            perf_flags = "kernel_cache,auto_cache,entry_timeout=60,attr_timeout=60,big_writes,max_read=131072,max_write=131072,compression=no"
+            mount_cmd = f"sshfs {q_user}@{q_host}:{q_target} {q_dest} -o allow_other,default_permissions,{perf_flags} -o IdentityFile=/root/.ssh/{key_name}"
             result = subprocess.run(["docker", "exec", "devlinker-bridge", "bash", "-c", mount_cmd], capture_output=True, text=True)
             
             if result.returncode != 0:
@@ -955,7 +971,7 @@ grep -q '^Subsystem.*sftp' /etc/ssh/sshd_config || echo 'Subsystem sftp internal
         except Exception:
             pass
         try:
-            subprocess.Popen(f'start wsl.exe -d {distro} --cd "{wsl_path}"', shell=True)
+            subprocess.Popen(["cmd.exe", "/c", "start", "wsl.exe", "-d", distro, "--cd", wsl_path])
         except Exception as e:
             self.log(f"Could not open WSL terminal: {e}", is_error=True)
 
@@ -970,7 +986,7 @@ grep -q '^Subsystem.*sftp' /etc/ssh/sshd_config || echo 'Subsystem sftp internal
         except Exception:
             pass
         try:
-            subprocess.Popen(f'start cmd.exe /k docker exec -it {container_name} sh', shell=True)
+            subprocess.Popen(["cmd.exe", "/c", "start", "cmd.exe", "/k", "docker", "exec", "-it", container_name, "sh"])
         except Exception as e:
             self.log(f"Could not open container terminal: {e}", is_error=True)
 
@@ -986,11 +1002,13 @@ grep -q '^Subsystem.*sftp' /etc/ssh/sshd_config || echo 'Subsystem sftp internal
             target = next((m for m in db["wsl_mappings"] if m["name"].lower() == name.lower()), None)
             if target:
                 win_path = target["windows_path"]
-                if os.path.exists(win_path) or os.path.islink(win_path):
+                if win_path and os.path.islink(win_path):
                     try:
                         os.rmdir(win_path)
                     except Exception as e:
                         self.log(f"Failed to remove local link: {e}", is_error=True)
+                elif win_path and os.path.exists(win_path):
+                    self.log(f"[SAFETY] Skipping removal: '{win_path}' is a regular directory, not a link.", is_error=True)
                 db["wsl_mappings"] = [m for m in db["wsl_mappings"] if m["name"].lower() != name.lower()]
 
         elif env_type == "docker":
@@ -999,11 +1017,13 @@ grep -q '^Subsystem.*sftp' /etc/ssh/sshd_config || echo 'Subsystem sftp internal
                 if target.get("link_type") == "reverse":
                     # Remove only the symlink itself (never the contents), then unmount SSHFS
                     wp = target.get("windows_path", "")
-                    if target.get("symlink_created") and (os.path.islink(wp) or os.path.isdir(wp)):
+                    if target.get("symlink_created") and wp and os.path.islink(wp):
                         try:
                             os.rmdir(wp)
                         except Exception as e:
                             self.log(f"Failed to remove Windows symlink: {e}", is_error=True)
+                    elif wp and os.path.exists(wp):
+                        self.log(f"[SAFETY] Skipping removal: '{wp}' is a regular directory, not a link.", is_error=True)
                     self._unmount_wsl_sshfs(target["wsl_distro"], target["wsl_mount_path"])
                 # Stop dev container
                 subprocess.run(["docker", "rm", "-f", target["container_name"]], capture_output=True)

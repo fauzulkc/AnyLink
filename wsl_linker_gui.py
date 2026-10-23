@@ -12,7 +12,7 @@ import customtkinter as ctk
 # Ensure script parent directory is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from wsl_linker import get_registry_path, check_windows_drive_type
+from wsl_linker import get_registry_path, check_windows_drive_type, load_registry, save_registry
 
 # Set modern appearance mode and color theme
 ctk.set_appearance_mode("Dark")
@@ -91,21 +91,12 @@ class WSLLinkerApp(ctk.CTk):
 
     def load_registry(self):
         """Load registered mappings from links.json."""
-        path = self.get_registry_path()
-        if not path.exists():
-            return {"mappings": []}
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {"mappings": []}
+        return load_registry()
 
     def save_registry(self, data):
         """Save registry mappings to links.json."""
-        path = self.get_registry_path()
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            save_registry(data)
         except Exception as e:
             self.log(f"Error saving registry: {e}", is_error=True)
 
@@ -550,8 +541,7 @@ class WSLLinkerApp(ctk.CTk):
         wt_cmd = ["wt.exe", "-p", distro, "-d", wsl_unc_path]
 
         # Strategy 2: Fallback — direct wsl.exe in a new console window
-        # "start" launches a detached window; wsl --cd lands directly in Linux directory
-        fallback_cmd = f'start wsl.exe -d {distro} --cd "{wsl_path}"'
+        fallback_cmd = ["cmd.exe", "/c", "start", "wsl.exe", "-d", distro, "--cd", wsl_path]
 
         try:
             # Check if Windows Terminal is available
@@ -564,7 +554,7 @@ class WSLLinkerApp(ctk.CTk):
         except Exception:
             # Fallback to plain wsl.exe
             try:
-                subprocess.run(fallback_cmd, shell=True)
+                subprocess.Popen(fallback_cmd)
                 self.log(f"Opened WSL terminal → [{distro}] {wsl_path}", is_success=True)
             except Exception as e:
                 self.log(f"Failed to launch terminal: {e}", is_error=True)

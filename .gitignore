@@ -12,3 +12,5 @@ __pycache__/
 workspace/
 test_projects/
 
+# Multi-agent teamwork scratch
+.agents/

@@ -12,14 +12,18 @@ All mounts, SFTP tunnels, and volume syncs happen inside a Docker Sidecar Bridge
 import os
 import sys
 import json
+import shlex
 import subprocess
+import tempfile
+import shutil
 from pathlib import Path
 import uuid
 import datetime
 
 # Registry config location
 def get_experimental_dir():
-    path = Path.home() / ".wsl-linker-experimental"
+    env_dir = os.environ.get("WSL_LINKER_EXPERIMENTAL_DIR")
+    path = Path(env_dir) if env_dir else Path.home() / ".wsl-linker-experimental"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -32,17 +36,40 @@ def load_config():
         return {"credentials": {}, "environments": [], "dev_containers": [], "bridge_active": False}
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"credentials": {}, "environments": [], "dev_containers": [], "bridge_active": False}
+            data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError(f"Root JSON entity in '{path}' must be an object")
+            return data
+    except Exception as e:
+        bak_path = path.with_name(path.name + ".corrupt.bak")
+        try:
+            shutil.copy2(path, bak_path)
+        except Exception:
+            pass
+        raise RuntimeError(f"Corrupt config at '{path}': {e}. Backup created at '{bak_path}'") from e
 
 def save_config(config):
     path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    dir_path = path.parent
+    temp_file = None
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, encoding="utf-8") as f:
+            temp_file = f.name
             json.dump(config, f, indent=4, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_file, path)
+        temp_file = None
     except Exception as e:
         print(f"[ERROR] Failed to save config: {e}")
+        raise
+    finally:
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
 
 # =====================================================================
 # DOCKER SIDECAR BRIDGE ORCHESTRATION
@@ -93,8 +120,8 @@ CMD ["tail", "-f", "/dev/null"]
         bridge_cmd = [
             "docker", "run", "-d",
             "--name", "devlinker-bridge",
-            "--privileged",  # Required for fuse/sshfs mounting inside the container
-            "-v", "/var/run/docker.sock:/var/run/docker.sock",
+            "--cap-add=SYS_ADMIN",
+            "--device", "/dev/fuse",
             "-v", f"{host_projects_dir}:/projects:shared",
             "devlinker-bridge"
         ]
@@ -195,7 +222,12 @@ def connect_remote_ssh_in_docker(profile_name, remote_path):
 
     # Execute SSHFS mount inside the Docker container
     print(f" -> Mounting {user}@{host}:{remote_path} to '/projects/{mount_dir_name}' in Docker...")
-    mount_cmd = f"sshfs {user}@{host}:{remote_path} /projects/{mount_dir_name} -o allow_other,default_permissions,cache=yes {sshfs_opt}"
+    q_user = shlex.quote(user)
+    q_host = shlex.quote(host)
+    q_remote = shlex.quote(remote_path)
+    q_dest = shlex.quote(f"/projects/{mount_dir_name}")
+    perf_flags = "kernel_cache,auto_cache,entry_timeout=60,attr_timeout=60,big_writes,max_read=131072,max_write=131072,compression=no"
+    mount_cmd = f"sshfs {q_user}@{q_host}:{q_remote} {q_dest} -o allow_other,default_permissions,{perf_flags} {sshfs_opt}"
     
     try:
         result = subprocess.run(["docker", "exec", "devlinker-bridge", "bash", "-c", mount_cmd], capture_output=True, text=True)
