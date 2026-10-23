@@ -240,3 +240,67 @@ Autonomous agents don't perform single reads or writes; they iterate through tig
 * Git status hashing, index lock acquisition, and tree object serialization.
 
 On `/mnt/c/`, every turn is throttled by 9P translation overhead, Windows NTFS metadata locks, and filter driver inspection. In native ext4, operations execute directly against the Linux page cache and in-memory VFS, delivering over **9x faster task resolution** for AI coding agents.
+
+### 8.5 Empirical Testbed & Environment Specifications
+To ensure absolute reproducibility of all case study findings, the testbed configuration is documented below:
+
+* **Host Operating System:** Windows 11 Pro (OS Build 26200)
+* **Host Hardware:** Intel Core i7 / 16-Core x86_64, 32GB RAM, NVMe SSD (NTFS formatted)
+* **WSL 2 Kernel Version:** `6.6.87.2-microsoft-standard-WSL2`
+* **Default Distribution:** Ubuntu 24.04 LTS (x86_64, native ext4 root partition)
+* **Docker Engine:** Docker Desktop 29.9.2 (WSL 2 backend engine)
+* **Antigravity CLI Version:** `agy` v2.5.5 (`ecfbad74d93962fc8ca485d93ab9b4f3d4cb6cf8`)
+* **Agent Model Evaluated:** `gemini-3.8-flash-low`
+
+### 8.6 Step-by-Step Benchmark Reproducibility Guide
+
+#### Benchmark A: Low-Level Filesystem I/O (1,500 Operations)
+```bash
+# Inside WSL 2:
+python3 -c "
+import os, time, shutil
+def bench(path, label, n=1500):
+    os.makedirs(path, exist_ok=True)
+    t0 = time.perf_counter()
+    for i in range(n):
+        with open(os.path.join(path, f'f_{i}.txt'), 'w') as f:
+            f.write(f'export const ID = {i};')
+    t1 = time.perf_counter()
+    for i in range(n):
+        with open(os.path.join(path, f'f_{i}.txt'), 'r') as f:
+            _ = f.read()
+    t2 = time.perf_counter()
+    count = sum(len(files) for _, _, files in os.walk(path))
+    t3 = time.perf_counter()
+    shutil.rmtree(path)
+    t4 = time.perf_counter()
+    print(f'{label}: Writes={(t1-t0):.3f}s, Reads={(t2-t1):.3f}s, Stat={(t3-t2)*1000:.1f}ms, Total={(t4-t0):.3f}s')
+
+bench('/mnt/c/Users/fauzu/bench_host', 'Host 9P NTFS')
+bench('/home/fauzul/bench_native', 'WSL 2 ext4')
+"
+```
+
+#### Benchmark B: Multi-Turn AGY Agentic Task
+```bash
+# Run in Host Path (cross-OS 9P):
+cd /mnt/c/Users/fauzu/agy_bench_host
+agy --model gemini-3.8-flash-low --dangerously-skip-permissions -p "Build a complete Python calculator project in the current directory: create lexer.py, parser.py, test_calc.py with 8 unit tests, run python3 -m unittest test_calc.py, write README.md, and initialize git repo with commit."
+
+# Run in Native ext4 / AnyLink Target:
+cd /home/fauzul/agy_bench_native
+agy --model gemini-3.8-flash-low --dangerously-skip-permissions -p "Build a complete Python calculator project in the current directory: create lexer.py, parser.py, test_calc.py with 8 unit tests, run python3 -m unittest test_calc.py, write README.md, and initialize git repo with commit."
+```
+
+---
+
+## 9. Architectural Recommendations for AI Tooling Authors
+
+Based on this engineering investigation, we offer the following architectural recommendations for teams building agentic coding platforms (Google DeepMind, Anthropic, Cursor, Microsoft):
+
+1. **Never Strip URI Authorities Blindly:**
+   When normalizing `file://` URIs, client frameworks should check if `authority` equals `wsl.localhost` or `wsl$` before forcing `{ authority: null }`. Stripping the authority converts a network resource into a broken local Windows root path (`C:\Ubuntu\...`).
+2. **Support Windows NTFS Reparse Points as First-Class Citizens:**
+   Windows NTFS directory symbolic links provide transparent, in-kernel redirection to remote network and virtualized filesystems with `DRIVE_FIXED` semantics. Language servers and file watchers should query paths through standard Win32 file APIs (`GetFileAttributesExW` / `ReadDirectoryChangesW`) rather than performing naive string-based path validation.
+3. **Decouple Host Editing from Guest Execution for Sandboxes:**
+   Autonomous agents should never run unchecked on a developer's host operating system or primary Linux distribution. The **Reverse Container Bridge pattern** (where files live in container-native storage and project outward to host IDEs via in-kernel junctions) provides the ideal balance: **complete process and dependency sandboxing with zero host I/O degradation.**
